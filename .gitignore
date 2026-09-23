@@ -24,7 +24,9 @@ pnpm-debug.log*
 
 # MongoDB local data (dev only)
 .mongo-data/
+.mongo/
 *.mdb
+*.zip
 
 # Testing / coverage
 coverage/
