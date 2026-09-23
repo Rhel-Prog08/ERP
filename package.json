@@ -10,9 +10,11 @@
   "scripts": {
     "backend": "npm run start --workspace=apps/backend",
     "backend:dev": "npm run dev --workspace=apps/backend",
+    "dev": "node scripts/dev.js",
     "frontend": "npm run start --workspace=apps/frontend",
     "frontend:web": "npm run web --workspace=apps/frontend",
     "seed": "npm run seed --workspace=apps/backend",
+    "smoke": "npm run smoke --workspace=apps/backend",
     "test": "npm run test --workspace=apps/backend",
     "test:backend": "npm run test --workspace=apps/backend"
   },
