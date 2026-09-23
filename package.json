@@ -1,0 +1,22 @@
+{
+  "name": "erp-pymes",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ERP modular para PyMES — monolito modular (React Native / React Native Web + Node.js + Express + MongoDB Atlas)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "backend": "npm run start --workspace=apps/backend",
+    "backend:dev": "npm run dev --workspace=apps/backend",
+    "frontend": "npm run start --workspace=apps/frontend",
+    "frontend:web": "npm run web --workspace=apps/frontend",
+    "seed": "npm run seed --workspace=apps/backend",
+    "test": "npm run test --workspace=apps/backend",
+    "test:backend": "npm run test --workspace=apps/backend"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
