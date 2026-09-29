@@ -34,6 +34,17 @@ if (!env.isTest) app.use(morgan('dev'));
 app.use(globalLimiter);
 app.use(sanitizeInput);
 
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      name: 'CodeEvo ERP API',
+      version: 'v1',
+      status: 'online',
+    },
+  });
+});
+
 // Salud del servicio (usado por pruebas y supervisión).
 app.get('/api/v1/health', (req, res) => {
   res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });

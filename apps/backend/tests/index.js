@@ -22,6 +22,7 @@
  * tests/…/*.test.js (un proceso por archivo).
  */
 
+require('./root.test');
 require('./auth.test');
 require('./rbac.test');
 require('./products.test');
