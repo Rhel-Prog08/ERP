@@ -155,7 +155,7 @@ La suite cubre: autenticación (token válido/inválido/expirado, bloqueo),
 RBAC (autorizado/no autorizado), productos (SKU duplicado), inventario
 (entrada/salida/insuficiente/ajuste), compras, ventas, **multiempresa
 (empresa A → empresa B denegado)**, auditoría y escenario E2E de 18 pasos.
-Ver [docs/testing.md](docs/testing.md).
+Ver [docs/deployment/testing.md](docs/deployment/testing.md).
 
 ---
 
@@ -179,3 +179,4 @@ Ver [docs/testing.md](docs/testing.md).
 | [docs/testing.md](docs/testing.md) | Cómo ejecutar y cubrir pruebas |
 | [docs/user-guide.md](docs/user-guide.md) | Guía de uso por módulo |
 | [docs/audit/](docs/audit/) | Auditoría inicial y reporte final |
+| [docs/deployment/DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) | Despliegue en Render, Atlas, Web y EAS |

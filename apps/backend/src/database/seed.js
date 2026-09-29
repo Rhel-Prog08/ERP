@@ -131,6 +131,10 @@ async function ensureAdmin(company, adminRole, session) {
 }
 
 async function main() {
+  if (env.isProd) {
+    throw new Error('El seed de desarrollo no puede ejecutarse en producción.');
+  }
+
   await connectDB();
 
   try {

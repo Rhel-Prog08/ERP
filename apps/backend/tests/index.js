@@ -22,6 +22,7 @@
  * tests/…/*.test.js (un proceso por archivo).
  */
 
+require('./transactions.test');
 require('./auth.test');
 require('./rbac.test');
 require('./products.test');
@@ -30,3 +31,4 @@ require('./purchases.test');
 require('./sales.test');
 require('./multiempresa.test');
 require('./e2e.test');
+require('./deployment.test');

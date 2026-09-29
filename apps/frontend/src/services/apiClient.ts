@@ -8,8 +8,36 @@ import type {
 } from '../types/api';
 
 /** URL base de la API (Expo inlina EXPO_PUBLIC_* en build). */
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const appEnvironment = process.env.EXPO_PUBLIC_APP_ENV || 'development';
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL;
+const isDevelopment = appEnvironment === 'development' && process.env.NODE_ENV !== 'production';
+
+if (!isDevelopment && !configuredApiUrl) {
+  throw new Error('Configura EXPO_PUBLIC_API_URL para builds preview y production.');
+}
+
+if (!isDevelopment && configuredApiUrl) {
+  let apiUrl: URL;
+  try {
+    apiUrl = new URL(configuredApiUrl);
+  } catch {
+    throw new Error('EXPO_PUBLIC_API_URL debe ser una URL HTTPS válida en builds preview y production.');
+  }
+  const hostname = apiUrl.hostname.replace(/^\[|\]$/g, '');
+  const isIpAddress =
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':');
+  if (
+    apiUrl.protocol !== 'https:' ||
+    apiUrl.username ||
+    apiUrl.password ||
+    hostname === 'localhost' ||
+    isIpAddress
+  ) {
+    throw new Error('EXPO_PUBLIC_API_URL debe usar HTTPS con un hostname (sin credenciales ni IP local) en builds preview y production.');
+  }
+}
+
+export const API_BASE_URL = configuredApiUrl || 'http://localhost:4000/api/v1';
 
 /** Error tipado del cliente: code/message/details + HTTP status. */
 export class ApiError extends Error {

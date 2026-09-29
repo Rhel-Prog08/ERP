@@ -78,8 +78,8 @@ cualquier `update*/delete*` y no existe endpoint de escritura.
 
 1. Comprueba en la conexión (`hello`) si es replica set → `txSupported`.
 2. Si lo es: `session.withTransaction()` (rollback automático).
-3. Si no: ejecuta `fn(null)` **sin sesión** y avisa por consola
-   (degradación explícita para entornos sin replica set).
+3. Si no: rechaza con `503 TRANSACTIONS_UNAVAILABLE` antes de ejecutar `fn`;
+   nunca ejecuta la operación sin sesión.
 
 Operaciones transaccionales: crear empresa (+roles+almacén+settings),
 alta/edición de usuarios y roles, confirmar/recibir/cancelar ventas y
@@ -107,6 +107,8 @@ en altas concurrentes.
 5. Usuario admin con todos los permisos.
 
 Repitable sin duplicados: cada paso consulta existencia antes de crear.
+El seed contiene un usuario demo con credenciales solo de desarrollo y rechaza
+la ejecución cuando `NODE_ENV=production`.
 
 ## 6. Copias de seguridad y purga
 

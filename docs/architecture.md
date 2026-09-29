@@ -13,8 +13,8 @@ negocio.
 │  React Native + RN Web     │  JSON {success,data}  │  Express (Node.js)          │
 │  Expo SDK 57 · TypeScript  │ ◄──────────────────── │  /api/v1/*                  │
 └────────────────────────────┘   Bearer JWT (15 min) └──────────────┬──────────────┘
-  · 14 pantallas                + refresh (7 d)                    │ Mongoose
-  · Context (auth/permisos)                                      │ transacciones
+  · Expo App.tsx (pantalla inicial)                               │ Mongoose
+  · servicios API y tipos                                          │ transacciones
   · fetch centralizado                                           ▼ (replica set)
                                                     ┌─────────────────────────────┐
                                                     │ MongoDB (Atlas o local rs0) │
@@ -46,7 +46,7 @@ Patrones clave:
 | **CRUD factory** | `utils/crudFactory.js` | Módulos maestros (customers, suppliers, categories, products, branches, warehouses) comparten listado paginado + create + update + baja lógica con auditoría. `categories` refuerza con `beforeDelete`: no se desactiva si hay productos activos usándola |
 | **Validador declarativo** | `utils/validate.js` | Whitelists `{campo: {type, required, min…}}`; rechaza claves fuera de esquema (defense-in-depth anti-injection) |
 | **Jerarquía de errores** | `utils/errors.js` | `ApiError` → Validation/Authentication/Authorization/NotFound/Conflict/Database/Internal; un único errorHandler los serializa |
-| **Transacciones** | `config/db.js#withTransaction` | Si el servidor es replica set usa sesión real; si no, ejecuta sin sesión y avisa (comportamiento degradado consciente) |
+| **Transacciones** | `config/db.js#withTransaction` | Usa sesión real; si el servidor no admite transacciones, rechaza la operación antes de ejecutar escrituras |
 | **Auditoría** | `modules/audit/service.js#recordAudit` | Se invoca DENTRO de la transacción de cada operación crítica (`strict:true`) → si falla la operación, no queda registro huérfano |
 | **Permisos dinámicos** | `utils/assertPermission.js` + `MOVEMENT_PERMISSION` | Un mismo endpoint (`POST /inventory/movements`) exige `inventory.entry/exit/adjust` según el tipo de movimiento |
 
@@ -104,30 +104,23 @@ Cancelaciones: mismo patrón con movimiento **inverso** (`RETURN` para ventas,
   con `companies.create`, para que un administrador pueda dar de alta usuarios
   en empresas hermanas del mismo grupo.
 
-## 6. Frontend
+## 6. Frontend (estado implementado)
 
 ```
+App.tsx             # pantalla inicial mínima de Expo
 src/
-├── components/     # Button, Input, Modal, DataTable, Pagination, Badge,
-│                   # ConfirmDialog, Card, KpiCard, EmptyState, Select, Layout(AppShell)
-├── screens/        # 14 pantallas (Login…Settings)
-├── navigation/     # RootNavigator: sin sesión → Login; con sesión → shell + stack
-├── services/       # apiClient (fetch + refresh automático) + un service por módulo
-├── stores/         # AuthContext (user, tokens, permisos) + useAsync
-├── hooks/          # usePermissions, useApi
-├── utils/          # formatCurrency, formatDate, buildQuery
-├── constants/      # permissions, statuses
-└── types/          # interfaces TS espejo del API
+├── services/       # apiClient + servicios por módulo del API
+├── utils/          # buildQuery, format, refs
+├── constants/      # permissions, statuses, theme
+└── types/          # tipos de API y modelos
 ```
 
-- **Un único punto de acceso HTTP** (`services/apiClient.ts`): adjunta el
-  Bearer, traduce el envelope, y ante un 401 intenta **una** vez
-  `POST /auth/refresh` y reintenta la petición; si falla, cierra sesión.
-- **Permisos en UI**: `usePermissions().has('sales.create')` oculta o
-  deshabilita acciones. Es **sólo comodidad**: la autoridad real sigue siendo
-  el backend (nunca se confía en la UI).
-- **Responsive**: `useWindowDimensions` — ≥1024 sidebar fija, 768–1023
-  colapsada, <768 menú hamburguesa; mismo código RN/RN Web (max. code sharing).
+- El manifiesto declara React Navigation, pero actualmente no hay
+  `NavigationContainer`, rutas/screens ni contexto de autenticación en uso.
+- `apiClient.ts` gestiona Bearer, envelope y refresh de tokens; la UI que
+  consumirá esos servicios todavía debe implementarse.
+- La navegación y el diseño responsive no están implementados aún. No se
+  migra ni sustituye el framework en esta fase de preparación de despliegue.
 
 ## 7. Decisiones y alternativas descartadas
 
@@ -137,8 +130,8 @@ src/
 | Validador propio declarativo | Joi/Zod/express-validator | Dependencias mínimas; whitelist estricta que además bloquea claves raras |
 | CRUD factory | Capa de servicios 1:1 por maestro | 6 módulos idénticos → un solo archivo testeado |
 | node:test + supertest | Jest | Runner nativo, cero dependencias extra, arranque rápido |
-| Context + fetch | Redux/axios | Estado global mínimo (auth); fetch cubre el envelope y el refresh |
-| MongoDB transactions con fallback | Exigir replica set | Paridad local/Atlas y degradación explícita con aviso |
+| fetch centralizado | Redux/axios | El cliente implementa el envelope y el refresh; el estado de UI aún está pendiente |
+| Exigir soporte de transacciones | Ejecutar operaciones sin sesión | Evita cambios parciales en operaciones transaccionales |
 | Baja lógica (`status: inactive`) | Borrado físico | Trazabilidad e integridad referencial (auditLogs, ventas) |
 
 ## 8. Fronteras de seguridad (resumen)

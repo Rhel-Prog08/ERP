@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const mongoose = require('mongoose');
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -34,9 +35,28 @@ if (!env.isTest) app.use(morgan('dev'));
 app.use(globalLimiter);
 app.use(sanitizeInput);
 
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      name: 'CodeEvo ERP API',
+      version: 'v1',
+      status: 'online',
+    },
+  });
+});
+
 // Salud del servicio (usado por pruebas y supervisión).
 app.get('/api/v1/health', (req, res) => {
-  res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });
+  const databaseConnected = mongoose.connection.readyState === 1;
+  res.status(databaseConnected ? 200 : 503).json({
+    success: true,
+    data: {
+      api: 'ok',
+      database: databaseConnected ? 'connected' : 'disconnected',
+      uptime: process.uptime(),
+    },
+  });
 });
 
 app.use('/api/v1', apiRouter);

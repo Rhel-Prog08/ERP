@@ -54,6 +54,12 @@ class DatabaseError extends ApiError {
   }
 }
 
+class TransactionUnavailableError extends ApiError {
+  constructor(message = 'El servidor MongoDB no admite transacciones; la operación no se ejecutó') {
+    super(503, 'TRANSACTIONS_UNAVAILABLE', message);
+  }
+}
+
 class InternalServerError extends ApiError {
   constructor(message = 'Error interno del servidor') {
     super(500, 'INTERNAL_SERVER_ERROR', message);
@@ -68,5 +74,6 @@ module.exports = {
   NotFoundError,
   ConflictError,
   DatabaseError,
+  TransactionUnavailableError,
   InternalServerError,
 };

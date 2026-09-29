@@ -7,10 +7,10 @@ const env = require('./env');
  * Conexión a MongoDB + soporte de transacciones.
  *
  * Las transacciones de MongoDB requieren replica set (Atlas lo es; en local
- * arrancamos mongod con --replSet rs0). Si el servidor no es replica set,
- * `withTransaction` ejecuta la función sin sesión y se emite un aviso:
- * es el comportamiento "cuando sean posibles" que pide el diseño.
+ * arrancamos mongod con --replSet rs0). Las operaciones que usan este helper
+ * nunca se ejecutan parcialmente sin sesión.
  */
+const { TransactionUnavailableError } = require('../utils/errors');
 
 let txSupported = false;
 
@@ -43,12 +43,12 @@ function transactionsSupported() {
 }
 
 /**
- * Ejecuta `fn(session)` dentro de una transacción cuando el servidor la
- * soporta; en caso contrario la ejecuta sin sesión (session = null).
+ * Ejecuta `fn(session)` dentro de una transacción. Falla antes de llamar a fn
+ * si el servidor no soporta transacciones para evitar escrituras parciales.
  * Los servicios deben propagar `session` a todas las operaciones.
  */
 async function withTransaction(fn) {
-  if (!txSupported) return fn(null);
+  if (!txSupported) throw new TransactionUnavailableError();
 
   const session = await mongoose.startSession();
   let result;
