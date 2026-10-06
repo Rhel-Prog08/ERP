@@ -42,8 +42,14 @@ Thumbs.db
 # Kotlin / Android (generated)
 apps/frontend/android/app/build/
 apps/frontend/.gradle/
+apps/android/.idea/
+apps/android/.gradle/
+apps/android/local.properties
+apps/android/**/build/
 *.apk
 *.aab
+*.jks
+*.keystore
 
 # Temporary
 tmp/
