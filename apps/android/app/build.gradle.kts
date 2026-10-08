@@ -6,13 +6,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.erp"
+    namespace = "com.codeevo.erp"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.erp"
+        applicationId = "com.codeevo.erp"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
