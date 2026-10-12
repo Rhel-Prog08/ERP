@@ -28,6 +28,9 @@
  *
  * NO crea productos, ventas, compras, clientes, proveedores ni movimientos.
  * NO modifica ni elimina información existente.
+ * Si BOOTSTRAP_ADMIN_EMAIL ya existe, debe corresponder al administrador
+ * esperado de ESTA empresa (mismo companyId, rol Administrador y estado
+ * active); si no, se aborta con error SIN tocar el usuario existente.
  * NUNCA muestra ni registra la contraseña en consola.
  *
  * Uso:  npm run bootstrap   (desde apps/backend)
@@ -226,7 +229,26 @@ async function ensureRoles(companyId, session) {
 async function ensureAdmin(cfg, company, adminRole, session) {
   const existing = await User.findOne({ email: cfg.admin.email }).session(session || null);
   if (existing) {
-    // Email global: si ya existe (en cualquier empresa) NO se toca nada.
+    // El email es global: si ya existe DEBE corresponder al administrador
+    // esperado de ESTA empresa. Si no, se aborta el bootstrap sin modificar
+    // nada (ni empresa, ni rol, ni contraseña, ni estado del usuario).
+    const problems = [];
+    if (String(existing.companyId) !== String(company._id)) {
+      problems.push('no pertenece a la empresa del bootstrap');
+    }
+    if (String(existing.roleId) !== String(adminRole._id)) {
+      problems.push('no tiene el rol Administrador de esta empresa');
+    }
+    if (existing.status !== 'active') {
+      problems.push('el usuario no está activo');
+    }
+    if (problems.length > 0) {
+      throw new ValidationError(
+        `El email BOOTSTRAP_ADMIN_EMAIL ya existe pero no corresponde al administrador ` +
+          `esperado de esta empresa (${problems.join('; ')}). ` +
+          'No se modifica el usuario existente.'
+      );
+    }
     console.log(`[bootstrap] Usuario administrador ya existente: ${existing.email}`);
     return existing;
   }
