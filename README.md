@@ -57,7 +57,9 @@ npm.cmd run dev            # raíz: backend (watch) + frontend (expo)
 | Sucursal / Almacén | Sucursal Central / Almacén Central |
 
 > Estas credenciales las crea `npm run seed`. Bórralas (o cambia la contraseña)
-> antes de cualquier despliegue real.
+> antes de cualquier despliegue real. Con `NODE_ENV=production` el seed queda
+> **bloqueado**; la primera inicialización en producción se hace con
+> `npm run bootstrap` (ver sección 4).
 
 ---
 
@@ -95,7 +97,14 @@ mongodb+srv://usuario:clave@cluster0.xxxxx.mongodb.net/erp?retryWrites=true&w=ma
 > **sólo** en `.env`, nunca en el código ni en git.
 
 5. Configurar `MONGO_URI` en el `.env` del entorno de despliegue y ejecutar
-   `npm run seed -w apps/backend` una vez.
+   **una única vez** `npm run bootstrap -w apps/backend`, definiendo antes las
+   variables `BOOTSTRAP_CONFIRM=CODEEVO_INITIAL_SETUP`,
+   `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`,
+   `BOOTSTRAP_ADMIN_FIRST_NAME`, `BOOTSTRAP_ADMIN_LAST_NAME` y
+   `BOOTSTRAP_COMPANY_NAME` (opcionales: `BOOTSTRAP_BRANCH_NAME`,
+   `BOOTSTRAP_WAREHOUSE_NAME`). Es idempotente: re-ejecutarlo no duplica nada
+   y nunca imprime la contraseña. `npm run seed` es SOLO de desarrollo y está
+   bloqueado en `NODE_ENV=production`.
 
 ---
 

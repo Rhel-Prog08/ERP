@@ -31,3 +31,4 @@ require('./purchases.test');
 require('./sales.test');
 require('./multiempresa.test');
 require('./e2e.test');
+require('./bootstrap.test');

@@ -34,14 +34,14 @@ function errorHandler(err, req, res, next) {
     } else if (err.code === 11000) {
       // Índice único duplicado (p. ej. SKU repetido en la empresa).
       const fields = Object.keys(err.keyValue || {});
-      const ConflictError = require('./errors').ConflictError;
+      const ConflictError = require('../utils/errors').ConflictError;
       error = new ConflictError(
         fields.length
           ? `El registro ya existe (${fields.join(', ')})`
           : 'El registro ya existe'
       );
     } else if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
-      const { AuthenticationError } = require('./errors');
+      const { AuthenticationError } = require('../utils/errors');
       error = new AuthenticationError('Token inválido o expirado');
     } else if (err.type === 'entity.parse.failed') {
       error = new ValidationError('JSON malformado en el cuerpo de la petición');
@@ -55,7 +55,7 @@ function errorHandler(err, req, res, next) {
       // No reconocido → 500 genérico (no filtrar el mensaje interno).
       // eslint-disable-next-line no-console
       console.error('[error]', err);
-      error = new (require('./errors').InternalServerError)();
+      error = new (require('../utils/errors').InternalServerError)();
     }
   }
 
