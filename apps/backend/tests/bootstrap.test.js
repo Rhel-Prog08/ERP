@@ -3,7 +3,7 @@
 /**
  * tests/bootstrap.test.js — SUITE DEL BOOTSTRAP SEGURO DE PRODUCCIÓN
  *
- * Qué verifica (los 7 escenarios pedidos):
+ * Qué verifica:
  *  1. seed de desarrollo RECHAZADO con NODE_ENV=production (exit ≠ 0);
  *  2. bootstrap sin BOOTSTRAP_CONFIRM → rechazado y SIN cambios en la BD;
  *  3. bootstrap sin BOOTSTRAP_ADMIN_PASSWORD → rechazado, listando sólo
@@ -15,7 +15,14 @@
  *  5b. (compatibilidad auth) login + GET /auth/me + POST /auth/refresh con
  *     el usuario creado por el bootstrap;
  *  6. segunda ejecución → NO duplica ningún registro (idempotente);
- *  7. la contraseña NUNCA aparece en los logs de ninguna ejecución.
+ *  6b. email existente PERTENECIENTE al administrador correcto → válido,
+ *      sin duplicar usuario y SIN tocar la contraseña;
+ *  6c. mismo email en OTRA empresa → el bootstrap falla y el usuario
+ *      existente queda intacto (empresa, rol, estado y contraseña);
+ *  6d. mismo email con OTRO rol → el bootstrap falla y el usuario intacto;
+ *  6e. mismo email INACTIVO → el bootstrap falla y sigue inactivo;
+ *  7. NI las contraseñas NI los secretos aparecen en los logs de ninguna
+ *      ejecución.
  *
  * Cada ejecución del script corre en UN PROCESO HIJO contra la base de
  * pruebas (erp_test heredada de tests/run.js): jamás toca la base de
@@ -57,6 +64,15 @@ const WEAK_PASSWORD = '99999999'; // cumple largo pero SIN letra → política l
 const COMPANY_NAME = 'Empresa Bootstrap Test';
 const BRANCH_NAME = 'Sucursal Bootstrap';
 const WAREHOUSE_NAME = 'Almacén Bootstrap';
+
+// Escenarios de CONFLICTO (sólo datos locales de prueba).
+const CONFLICT_EMAIL_COMPANY = 'conflict-company@bootstrap.test.local';
+const CONFLICT_EMAIL_ROLE = 'conflict-role@bootstrap.test.local';
+const CONFLICT_EMAIL_INACTIVE = 'conflict-inactive@bootstrap.test.local';
+const CONFLICT_PASSWORD = 'ConflictoClave123';
+
+/** Secretos que JAMÁS deben aparecer en la salida de ningún script. */
+const SECRETS_NEVER_IN_LOGS = [ADMIN_PASSWORD, WEAK_PASSWORD, CONFLICT_PASSWORD];
 
 /** Salidas de TODAS las ejecuciones (las revisa el test 7). */
 const capturedLogs = [];
@@ -231,17 +247,131 @@ describe('BOOTSTRAP — inicialización segura, idempotente y sin secretos', () 
     assert.deepEqual(await snapshot(), before, 'la segunda ejecución no debe duplicar ni modificar registros');
   });
 
-  it('7. la contraseña nunca aparece en los logs de ninguna ejecución', () => {
+  it('6b. email existente del administrador CORRECTO → lo reutiliza sin duplicar ni tocar nada', async () => {
+    const before = await User.findOne({ email: ADMIN_EMAIL }).select('+password');
+    assert.ok(before, 'el administrador debía existir de los tests previos');
+    const usersBefore = await User.countDocuments();
+
+    const r = runNode(BOOTSTRAP, bootstrapEnv());
+
+    assert.equal(r.status, 0, `debía completarse. Salida:\n${r.output}`);
+    assert.match(r.output, /Usuario administrador ya existente/);
+    assert.equal(await User.countDocuments(), usersBefore, 'no debe duplicar usuarios');
+
+    const after = await User.findOne({ email: ADMIN_EMAIL }).select('+password');
+    assert.equal(String(after.companyId), String(before.companyId), 'no debe reasignar empresa');
+    assert.equal(String(after.roleId), String(before.roleId), 'no debe reasignar rol');
+    assert.equal(after.status, before.status, 'no debe cambiar el estado');
+    assert.equal(after.password, before.password, 'no debe modificar la contraseña');
+  });
+
+  it('6c. mismo email en OTRA empresa → falla y el usuario original queda intacto', async () => {
+    // Usuario con el MISMO email de bootstrap pero en la empresa de fixtures.
+    const alfa = await Company.findOne({ name: 'Empresa Alfa' });
+    const alfaRole = await Role.findOne({ companyId: alfa._id, name: 'Administrador' });
+    await User.create({
+      firstName: 'Otra',
+      lastName: 'Empresa',
+      email: CONFLICT_EMAIL_COMPANY,
+      password: CONFLICT_PASSWORD,
+      roleId: alfaRole._id,
+      companyId: alfa._id,
+      status: 'active',
+    });
+    const before = await User.findOne({ email: CONFLICT_EMAIL_COMPANY }).select('+password');
+    const usersBefore = await User.countDocuments();
+
+    const r = runNode(BOOTSTRAP, bootstrapEnv({ BOOTSTRAP_ADMIN_EMAIL: CONFLICT_EMAIL_COMPANY }));
+
+    assert.notEqual(r.status, 0, `debía abortar. Salida:\n${r.output}`);
+    assert.match(r.output, /ya existe pero no corresponde al administrador esperado/);
+    assert.match(r.output, /no pertenece a la empresa del bootstrap/);
+
+    const after = await User.findOne({ email: CONFLICT_EMAIL_COMPANY }).select('+password');
+    assert.equal(await User.countDocuments(), usersBefore, 'no debe crear ni eliminar usuarios');
+    assert.equal(String(after.companyId), String(before.companyId), 'no debe reasignar empresa');
+    assert.equal(String(after.roleId), String(before.roleId), 'no debe reasignar rol');
+    assert.equal(after.status, 'active', 'no debe cambiar el estado');
+    assert.equal(after.password, before.password, 'no debe modificar la contraseña');
+  });
+
+  it('6d. mismo email con OTRO rol (misma empresa) → falla y el usuario queda intacto', async () => {
+    // Mismo email y empresa del bootstrap pero con rol "Consulta".
+    const company = await Company.findOne({ name: COMPANY_NAME });
+    const consultRole = await Role.findOne({ companyId: company._id, name: 'Consulta' });
+    await User.create({
+      firstName: 'Otro',
+      lastName: 'Rol',
+      email: CONFLICT_EMAIL_ROLE,
+      password: CONFLICT_PASSWORD,
+      roleId: consultRole._id,
+      companyId: company._id,
+      status: 'active',
+    });
+    const before = await User.findOne({ email: CONFLICT_EMAIL_ROLE }).select('+password');
+    const usersBefore = await User.countDocuments();
+
+    const r = runNode(BOOTSTRAP, bootstrapEnv({ BOOTSTRAP_ADMIN_EMAIL: CONFLICT_EMAIL_ROLE }));
+
+    assert.notEqual(r.status, 0, `debía abortar. Salida:\n${r.output}`);
+    assert.match(r.output, /no tiene el rol Administrador de esta empresa/);
+    assert.ok(!r.output.includes('no pertenece a la empresa'), 'la empresa SÍ coincide: no debe reportarse');
+    assert.ok(!r.output.includes('no está activo'), 'el estado SÍ es active: no debe reportarse');
+
+    const after = await User.findOne({ email: CONFLICT_EMAIL_ROLE }).select('+password');
+    assert.equal(await User.countDocuments(), usersBefore, 'no debe crear ni eliminar usuarios');
+    assert.equal(String(after.companyId), String(before.companyId), 'no debe reasignar empresa');
+    assert.equal(String(after.roleId), String(before.roleId), 'no debe reasignar rol');
+    assert.equal(after.status, 'active', 'no debe cambiar el estado');
+    assert.equal(after.password, before.password, 'no debe modificar la contraseña');
+  });
+
+  it('6e. mismo email INACTIVO → falla y el usuario sigue inactivo', async () => {
+    // Email y empresa correctos, rol Administrador correcto, pero INACTIVO.
+    const company = await Company.findOne({ name: COMPANY_NAME });
+    const adminRole = await Role.findOne({ companyId: company._id, name: 'Administrador' });
+    await User.create({
+      firstName: 'Inac',
+      lastName: 'Tivo',
+      email: CONFLICT_EMAIL_INACTIVE,
+      password: CONFLICT_PASSWORD,
+      roleId: adminRole._id,
+      companyId: company._id,
+      status: 'inactive',
+    });
+    const before = await User.findOne({ email: CONFLICT_EMAIL_INACTIVE }).select('+password');
+    const usersBefore = await User.countDocuments();
+
+    const r = runNode(BOOTSTRAP, bootstrapEnv({ BOOTSTRAP_ADMIN_EMAIL: CONFLICT_EMAIL_INACTIVE }));
+
+    assert.notEqual(r.status, 0, `debía abortar. Salida:\n${r.output}`);
+    assert.match(r.output, /el usuario no está activo/);
+    assert.ok(!r.output.includes('no pertenece a la empresa'), 'la empresa SÍ coincide: no debe reportarse');
+    assert.ok(!r.output.includes('no tiene el rol Administrador'), 'el rol SÍ coincide: no debe reportarse');
+
+    const after = await User.findOne({ email: CONFLICT_EMAIL_INACTIVE }).select('+password');
+    assert.equal(await User.countDocuments(), usersBefore, 'no debe crear ni eliminar usuarios');
+    assert.equal(after.status, 'inactive', 'no debe activar ni modificar el usuario');
+    assert.equal(String(after.companyId), String(before.companyId), 'no debe reasignar empresa');
+    assert.equal(String(after.roleId), String(before.roleId), 'no debe reasignar rol');
+    assert.equal(after.password, before.password, 'no debe modificar la contraseña');
+  });
+
+  it('7. ni contraseñas ni secretos aparecen en los logs de ninguna ejecución', () => {
     assert.ok(capturedLogs.length >= 6, `esperaban-se ≥6 ejecuciones capturadas, hubo ${capturedLogs.length}`);
     for (const entry of capturedLogs) {
-      assert.ok(
-        !entry.output.includes(ADMIN_PASSWORD),
-        `la contraseña de prueba apareció en la salida de ${entry.script}`
-      );
-      assert.ok(
-        !entry.output.includes(WEAK_PASSWORD),
-        `la contraseña débil apareció en la salida de ${entry.script}`
-      );
+      for (const secret of SECRETS_NEVER_IN_LOGS) {
+        assert.ok(
+          !entry.output.includes(secret),
+          `un secreto de prueba apareció en la salida de ${entry.script}`
+        );
+      }
+      if (process.env.JWT_SECRET) {
+        assert.ok(!entry.output.includes(process.env.JWT_SECRET), 'JWT_SECRET apareció en logs');
+      }
+      if (process.env.REFRESH_TOKEN_SECRET) {
+        assert.ok(!entry.output.includes(process.env.REFRESH_TOKEN_SECRET), 'REFRESH_TOKEN_SECRET apareció en logs');
+      }
     }
   });
 });
