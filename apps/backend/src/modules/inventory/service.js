@@ -200,7 +200,11 @@ async function applyMovement(params, session = null) {
 async function listBalances(actor, query = {}) {
   const { page, limit, skip } = getPagination(query, { defaultLimit: 20, maxLimit: 100 });
 
-  const match = { companyId: actor.companyId };
+  const match = {
+    // La agregación NO castiga string→ObjectId: convertir explícitamente
+    // (actor.companyId llega como string desde el JWT).
+    companyId: require('mongoose').Types.ObjectId.createFromHexString(String(actor.companyId)),
+  };
   if (query.warehouseId) match.warehouseId = require('mongoose').Types.ObjectId.createFromHexString(query.warehouseId);
   if (query.productId) match.productId = require('mongoose').Types.ObjectId.createFromHexString(query.productId);
 

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Seed idempotente del ERP (desarrollo / primera puesta en marcha).
+ * Seed idempotente del ERP (SOLO DESARROLLO).
  *
  * Crea (si no existen):
  *  1. Catálogo GLOBAL de permisos (permissions)
@@ -10,10 +10,15 @@
  *  4. Almacén "Almacén Central"
  *  5. Ajustes por defecto (taxRate, allowNegativeStock)
  *  6. Los 6 roles por defecto de la empresa
- *  7. Usuario administrador (SOLO DESARROLLO)
+ *  7. Usuario administrador con contraseña CONOCIDA (SOLO DESARROLLO)
  *
  * Uso:  npm run seed   (desde apps/backend)
  * Seguro de ejecutar varias veces.
+ *
+ * PROTECCIÓN: cuando NODE_ENV=production este script finaliza con error
+ * (código de salida 1) ANTES de conectar a la base de datos. Una cuenta con
+ * contraseña conocida jamás debe crearse en producción; para la primera
+ * inicialización segura existe `npm run bootstrap` (src/database/bootstrap.js).
  */
 
 const env = require('../config/env');
@@ -131,6 +136,14 @@ async function ensureAdmin(company, adminRole, session) {
 }
 
 async function main() {
+  // BLOQUEO DE PRODUCCIÓN — nada de lo que sigue se ejecuta en NODE_ENV=production.
+  if (env.isProd) {
+    throw new Error(
+      'El seed de desarrollo no puede ejecutarse en producción. ' +
+        'Use "npm run bootstrap" con las variables BOOTSTRAP_* para la primera inicialización segura.'
+    );
+  }
+
   await connectDB();
 
   try {
