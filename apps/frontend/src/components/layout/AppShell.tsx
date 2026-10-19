@@ -42,17 +42,17 @@ export function AppShell({ children }: AppShellProps) {
             <View style={styles.content}>{children}</View>
           </View>
 
-          {/* Menú móvil (overlay) */}
+          {/* Menú móvil (overlay): el drawer se despliega desde la izquierda */}
           {isMobile && menuOpen ? (
             <View style={styles.overlay}>
+              <View style={styles.drawer}>
+                <Sidebar fill onNavigate={() => setMenuOpen(false)} />
+              </View>
               <Pressable
                 style={[styles.scrim, { backgroundColor: c.overlay }]}
                 onPress={() => setMenuOpen(false)}
                 accessibilityLabel="Cerrar menú"
               />
-              <View style={styles.drawer}>
-                <Sidebar onNavigate={() => setMenuOpen(false)} />
-              </View>
             </View>
           ) : null}
         </View>
@@ -76,5 +76,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   scrim: { flex: 1 },
-  drawer: { width: 260, overflow: 'hidden' },
+  // Drawer móvil: hasta 280 px o el espacio disponible si la pantalla es más estrecha.
+  drawer: { width: 280, maxWidth: '100%', flexGrow: 0, flexShrink: 1, overflow: 'hidden' },
 });
