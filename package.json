@@ -13,6 +13,7 @@
     "dev": "node scripts/dev.js",
     "frontend": "npm run start --workspace=apps/frontend",
     "frontend:web": "npm run web --workspace=apps/frontend",
+    "build:web": "npm run export:web --workspace=apps/frontend",
     "seed": "npm run seed --workspace=apps/backend",
     "smoke": "npm run smoke --workspace=apps/backend",
     "test": "npm run test --workspace=apps/backend",
