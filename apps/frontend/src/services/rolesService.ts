@@ -1,6 +1,5 @@
 import { request } from './apiClient';
-import type { Status } from '../types/models';
-import type { Role } from '../types/models';
+import type { Role, Status } from '../types/models';
 
 export interface RoleInput {
   name: string;

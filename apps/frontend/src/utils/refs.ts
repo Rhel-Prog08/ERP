@@ -27,6 +27,6 @@ export function personName(value: RefLike): string {
 }
 
 /** Concatena partes opcionales ignorando vacíos. */
-export function joinParts(...parts: Array<string | null | undefined>): string {
+export function joinParts(...parts: (string | null | undefined)[]): string {
   return parts.filter(Boolean).join(' · ');
 }

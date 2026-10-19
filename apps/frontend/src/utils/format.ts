@@ -5,10 +5,6 @@ const currencyFormatter = new Intl.NumberFormat('es-ES', {
   currency: 'EUR',
 });
 
-const numberFormatter = new Intl.NumberFormat('es-ES', {
-  maximumFractionDigits: 2,
-});
-
 const percentFormatter = new Intl.NumberFormat('es-ES', {
   style: 'percent',
   maximumFractionDigits: 2,

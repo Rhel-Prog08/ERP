@@ -230,7 +230,7 @@ export async function requestCsv(
   }
 
   if (!res.ok) {
-    const { envelope, text } = await parseBody(res);
+    const { envelope } = await parseBody(res);
     const err = envelope && !envelope.success ? envelope : null;
     throw new ApiError(err?.error.message ?? `Error al exportar (${res.status})`, {
       code: err?.error.code ?? `HTTP_${res.status}`,
