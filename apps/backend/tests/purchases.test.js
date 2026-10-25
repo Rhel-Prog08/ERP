@@ -90,7 +90,7 @@ describe('COMPRAS — alta, recepción con stock y cancelaciones', () => {
     const sup = await api
       .post('/api/v1/suppliers')
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Proveedor Uno', email: 'prov@uno.test' });
+      .send({ name: 'Proveedor Uno', email: 'prov@uno.test', phone: '5511223305' });
     assertOk(sup, 201);
     supplierId = String(sup.body.data._id);
   });
