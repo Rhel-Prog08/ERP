@@ -17,6 +17,16 @@ import { customersService, type CustomerInput } from '../../services/customersSe
 import type { Customer } from '../../types/models';
 import { STATUS_OPTIONS } from '../../constants/statuses';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
+import {
+  ADDRESS_MAX,
+  COMPANY_MAX,
+  NAME_MAX,
+  PHONE_MAXLENGTH_INPUT,
+  buildContactPayload,
+  validateContactForm,
+  type ContactFormErrors,
+  type ContactFormValues,
+} from '../../utils/validators';
 import { ScreenHeader } from '../../components/layout/ScreenHeader';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -29,7 +39,17 @@ import { Pagination } from '../../components/ui/Pagination';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/States';
 
-const EMPTY_FORM: CustomerInput = { name: '', companyName: '', email: '', phone: '', address: '' };
+/** Estado del formulario: campos de contacto + estado del registro. */
+type ContactFormState = ContactFormValues & { status: Customer['status'] };
+
+const EMPTY_FORM: ContactFormState = {
+  name: '',
+  companyName: '',
+  email: '',
+  phone: '',
+  address: '',
+  status: 'active',
+};
 
 /** Clientes: CRUD real contra /api/v1/customers (búsqueda ?q=, paginación). */
 export default function ClientesScreen() {
@@ -45,7 +65,7 @@ export default function ClientesScreen() {
 
   const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
-  const [form, setForm] = useState<CustomerInput>(EMPTY_FORM);
+  const [form, setForm] = useState<ContactFormState>(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | undefined>>({});
   const [saving, setSaving] = useState(false);
   const [toDeactivate, setToDeactivate] = useState<Customer | null>(null);
@@ -74,18 +94,32 @@ export default function ClientesScreen() {
 
   const save = async () => {
     setFieldErrors({});
-    if (!form.name.trim()) {
-      setFieldErrors({ name: 'El nombre es obligatorio' });
+    // Reglas MX (espejo del backend): nombre 2–120; la creación exige email y
+    // teléfono; en edición sólo se valida lo modificado respecto al registro.
+    const original: ContactFormValues | undefined = editing
+      ? {
+          name: editing.name,
+          email: editing.email ?? '',
+          phone: editing.phone ?? '',
+          companyName: editing.companyName ?? '',
+          address: editing.address ?? '',
+        }
+      : undefined;
+    const errors: ContactFormErrors = validateContactForm(form, {
+      requireContact: !editing,
+      original,
+    });
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
     setSaving(true);
     try {
+      // En edición se omiten los campos no modificados: no se reenvían valores
+      // antiguos (posiblemente inválidos) al backend.
       const payload: CustomerInput = {
-        ...form,
-        companyName: form.companyName?.trim() || undefined,
-        email: form.email?.trim() || undefined,
-        phone: form.phone?.trim() || undefined,
-        address: form.address?.trim() || undefined,
+        ...buildContactPayload(form, original),
+        status: form.status,
       };
       if (editing) {
         await customersService.update(editing._id, payload);
@@ -222,6 +256,7 @@ export default function ClientesScreen() {
                 onChangeText={(v) => setForm((f) => ({ ...f, name: v }))}
                 error={fieldErrors.name}
                 placeholder="Nombre del cliente"
+                maxLength={NAME_MAX}
                 editable={!saving}
               />
               <Input
@@ -230,27 +265,31 @@ export default function ClientesScreen() {
                 onChangeText={(v) => setForm((f) => ({ ...f, companyName: v }))}
                 error={fieldErrors.companyName}
                 placeholder="Razón social (opcional)"
+                maxLength={COMPANY_MAX}
                 editable={!saving}
               />
               <View style={styles.formRow}>
                 <Input
-                  label="Email"
+                  label={editing ? 'Email' : 'Email *'}
                   value={form.email}
                   onChangeText={(v) => setForm((f) => ({ ...f, email: v }))}
                   error={fieldErrors.email}
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoCorrect={false}
                   placeholder="correo@empresa.com"
                   editable={!saving}
                   containerStyle={styles.formCol}
                 />
                 <Input
-                  label="Teléfono"
+                  label={editing ? 'Teléfono' : 'Teléfono *'}
                   value={form.phone}
-                  onChangeText={(v) => setForm((f) => ({ ...f, phone: v }))}
+                  onChangeText={(v) => setForm((f) => ({ ...f, phone: v.replace(/[^0-9]/g, '') }))}
                   error={fieldErrors.phone}
-                  keyboardType="phone-pad"
-                  placeholder="600 000 000"
+                  keyboardType="numeric"
+                  maxLength={PHONE_MAXLENGTH_INPUT}
+                  placeholder="10 dígitos"
+                  hint="Sólo dígitos, exactamente 10"
                   editable={!saving}
                   containerStyle={styles.formCol}
                 />
@@ -261,6 +300,7 @@ export default function ClientesScreen() {
                 onChangeText={(v) => setForm((f) => ({ ...f, address: v }))}
                 error={fieldErrors.address}
                 placeholder="Dirección (opcional)"
+                maxLength={ADDRESS_MAX}
                 editable={!saving}
               />
               {editing ? (
