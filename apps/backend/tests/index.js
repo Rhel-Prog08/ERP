@@ -39,4 +39,5 @@ require('./customers.test');
 require('./suppliers.test');
 require('./multiempresa.test');
 require('./e2e.test');
+require('./reports.test');
 require('./bootstrap.test');

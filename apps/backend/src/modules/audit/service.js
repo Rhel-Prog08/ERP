@@ -80,12 +80,14 @@ function buildAuditFilter(actor, query = {}) {
   if (query.dateFrom || query.dateTo) {
     filter.createdAt = {};
     if (query.dateFrom) {
-      const d = new Date(query.dateFrom);
+      const value = new Date(query.dateFrom);
+      const d = new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
       d.setHours(0, 0, 0, 0);
       filter.createdAt.$gte = d;
     }
     if (query.dateTo) {
-      const d = new Date(query.dateTo);
+      const value = new Date(query.dateTo);
+      const d = new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
       d.setHours(23, 59, 59, 999);
       filter.createdAt.$lte = d;
     }
