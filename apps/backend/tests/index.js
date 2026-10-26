@@ -22,6 +22,12 @@
  * tests/…/*.test.js (un proceso por archivo).
  */
 
+// registration.test DEBE ir PRIMERO: fija MAIL_PROVIDER=test y
+// REGISTRATION_ENABLED=true en su código inicial, ANTES de que cualquier
+// require cargue src/config/env (que se cachea en el primer require).
+require('./registration.test');
+require('./public-registration.test');
+require('./security.test');
 require('./root.test');
 require('./auth.test');
 require('./rbac.test');

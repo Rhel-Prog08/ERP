@@ -36,6 +36,9 @@ function serializeUser(user) {
     lastName: user.lastName,
     email: user.email,
     status: user.status,
+    // true para cuentas legacy/administrativas; sólo cuentas de registro
+    // público sin confirmar devuelven false.
+    emailVerified: !user.verificationRequired || Boolean(user.emailVerifiedAt),
     company: company
       ? { id: String(company._id), name: company.name }
       : { id: String(user.companyId), name: '' },
@@ -120,6 +123,26 @@ async function login({ email, password }, req) {
       ...meta,
     });
     throw new AuthenticationError('Cuenta desactivada');
+  }
+
+  // Cuenta nueva de registro público sin verificar: se bloquea el acceso
+  // DESPUÉS de validar la contraseña (sin enumerar usuarios ni filtrar el
+  // estado a terceros que no conozcan la clave). Las cuentas existentes
+  // (verificationRequired=false) siguen funcionando sin cambios.
+  if (user.verificationRequired && !user.emailVerifiedAt) {
+    await recordAudit({
+      userId: user._id,
+      companyId: user.companyId,
+      action: 'LOGIN_FAILED',
+      module: 'auth',
+      entity: 'user',
+      entityId: user._id,
+      description: 'Acceso denegado: correo electrónico sin verificar',
+      ...meta,
+    });
+    throw new AuthenticationError(
+      'La cuenta está pendiente de verificar el correo electrónico. Revise su bandeja para activarla.'
+    );
   }
 
   if (!user.roleId || !user.roleId._id) {

@@ -118,7 +118,11 @@ describe('BOOTSTRAP — inicialización segura, idempotente y sin secretos', () 
       // (nunca llegan a usarse: el guard corta ANTES de conectar).
       JWT_SECRET: 'jwt_falso_para_pruebas_000000000000000000',
       REFRESH_TOKEN_SECRET: 'refresh_falso_para_pruebas_111111111111111',
-      CLIENT_URL: 'http://localhost:8081',
+      // env.js exige URLs HTTPS en producción ANTES de cualquier otro guard
+      // (los enlaces de verificación deben ser HTTPS): se satisfase para que
+      // el mensaje que este test verifica —el guard del seed— sea el que se imprima.
+      CLIENT_URL: 'https://localhost.test',
+      APP_URL: 'https://localhost.test',
     });
 
     assert.notEqual(r.status, 0, `el seed en producción debía fallar. Salida:\n${r.output}`);

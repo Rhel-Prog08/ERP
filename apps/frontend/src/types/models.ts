@@ -32,6 +32,21 @@ export interface User extends BaseDoc {
   roleId: string | RoleRef;
   status: Status;
   lastLoginAt?: string | null;
+  /** true en cuentas de registro público aún pendientes de verificar. */
+  verificationRequired?: boolean;
+  emailVerifiedAt?: string | null;
+}
+
+/** Invitación de registro creada desde el módulo Usuarios. */
+export interface Invitation extends BaseDoc {
+  email: string;
+  firstName: string;
+  lastName: string;
+  roleId: string | RoleRef;
+  invitedBy: string;
+  status: 'pending' | 'used' | 'revoked';
+  expiresAt: string;
+  usedAt?: string | null;
 }
 
 export interface UserCreateInput {

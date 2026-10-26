@@ -34,6 +34,30 @@ const userSchema = new Schema(
       select: false,
     },
     lastLoginAt: { type: Date },
+    /**
+     * Verificación de correo (FASE 4). Compatibilidad con migración:
+     * - verificationRequired sólo lo activa el registro público; las cuentas
+     *   existentes (seed/bootstrap/alta por panel) quedan en false y siguen
+     *   funcionando sin cambios.
+     * - Se guarda SÓLO el hash del token (nunca el token en claro).
+     * - El token es de un solo uso: usedAt marca su consumo; caducidad por
+     *   expiresAt (30 min por defecto).
+     */
+    verificationRequired: { type: Boolean, default: false },
+    emailVerifiedAt: { type: Date, default: null },
+    emailVerification: {
+      type: new Schema(
+        {
+          tokenHash: { type: String },
+          expiresAt: { type: Date },
+          sentAt: { type: Date },
+          usedAt: { type: Date },
+        },
+        { _id: false }
+      ),
+      default: null,
+      select: false,
+    },
   },
   { timestamps: true }
 );
@@ -63,6 +87,7 @@ userSchema.set('toJSON', {
     delete ret.refreshTokens;
     delete ret.failedLoginAttempts;
     delete ret.lockUntil;
+    delete ret.emailVerification;
     return ret;
   },
 });

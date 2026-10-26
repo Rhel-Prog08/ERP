@@ -13,7 +13,49 @@ const { validate, validateQuery } = require('../../utils/validate');
 const { authenticate } = require('../../middlewares/authenticate');
 const { authorize } = require('../../middlewares/authorize');
 const service = require('./service');
+const registration = require('../registration/service');
 const { userListSchema, userCreateSchema, userUpdateSchema } = require('./validation');
+const {
+  invitationListSchema,
+  validateInvitationCreate,
+} = require('../registration/validation');
+
+/* --------------------------------------------------------------- *
+ * Invitaciones de registro (deben ir ANTES de las rutas /:id para
+ * que "invitations" no se interprete como un ObjectId de usuario).
+ * --------------------------------------------------------------- */
+
+// GET /api/v1/users/invitations — invitaciones de la empresa del token.
+router.get(
+  '/invitations',
+  authenticate,
+  authorize('users.read'),
+  validateQuery(invitationListSchema),
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, await registration.listInvitations(req.user, req.query));
+  })
+);
+
+// POST /api/v1/users/invitations — crea invitación y envía el correo.
+router.post(
+  '/invitations',
+  authenticate,
+  authorize('users.create'),
+  validateInvitationCreate,
+  asyncHandler(async (req, res) => {
+    sendCreated(res, await registration.createInvitation(req.user, req.body, req));
+  })
+);
+
+// DELETE /api/v1/users/invitations/:id — revoca una invitación pendiente.
+router.delete(
+  '/invitations/:id',
+  authenticate,
+  authorize('users.update'),
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, await registration.revokeInvitation(req.user, req.params.id, req));
+  })
+);
 
 // GET /api/v1/users — listado paginado + búsqueda (?q=) de la empresa del token.
 router.get(

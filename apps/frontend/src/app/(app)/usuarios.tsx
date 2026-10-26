@@ -15,7 +15,7 @@ import { useToast } from '../../context/ToastContext';
 import { toApiError } from '../../services/apiClient';
 import { usersService } from '../../services/usersService';
 import { rolesService } from '../../services/rolesService';
-import type { Role, Status, User, UserUpdateInput } from '../../types/models';
+import type { Invitation, Role, Status, User, UserUpdateInput } from '../../types/models';
 import type { QueryParams } from '../../types/api';
 import { formatDateTime } from '../../utils/format';
 import { STATUS_BADGES, STATUS_OPTIONS } from '../../constants/statuses';
@@ -102,6 +102,103 @@ export default function UsuariosScreen() {
   const [saving, setSaving] = useState(false);
   const [toDeactivate, setToDeactivate] = useState<User | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+
+  /* ------------------- Invitaciones de registro (FASE 3) ------------------- */
+  const [invites, setInvites] = useState<Invitation[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState<string | null>(null);
+  const [inviteVisible, setInviteVisible] = useState(false);
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [inviteErrors, setInviteErrors] = useState<Record<string, string | undefined>>({});
+  const [inviteForm, setInviteForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    roleId: '',
+  });
+  const [toRevoke, setToRevoke] = useState<Invitation | null>(null);
+  const [revoking, setRevoking] = useState(false);
+
+  const loadInvites = useCallback(() => {
+    setInvitesLoading(true);
+    setInvitesError(null);
+    usersService
+      .listInvitations({ limit: 20, status: 'pending' })
+      .then((data) => setInvites(data.items))
+      .catch((err) => setInvitesError(toApiError(err).message))
+      .finally(() => setInvitesLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    if (!can('users.read')) return;
+    // Arranque aplazado un tick: el setState de carga no se ejecuta de forma
+    // síncrona dentro del effect (regla set-state-in-effect). El resultado y
+    // el orden de la carga son idénticos.
+    const t = setTimeout(loadInvites, 0);
+    return () => clearTimeout(t);
+  }, [can, loadInvites]);
+
+  const openInvite = () => {
+    setInviteForm({
+      firstName: '',
+      lastName: '',
+      email: '',
+      roleId: roles.length === 1 ? roles[0]._id : '',
+    });
+    setInviteErrors({});
+    setInviteVisible(true);
+  };
+
+  const saveInvite = async () => {
+    const errors: Record<string, string | undefined> = {};
+    const mail = inviteForm.email.trim().toLowerCase();
+    if (!inviteForm.firstName.trim()) errors.firstName = 'Introduce el nombre';
+    if (!inviteForm.lastName.trim()) errors.lastName = 'Introduce los apellidos';
+    if (!mail) errors.email = 'Introduce el correo electrónico';
+    else if (!EMAIL_RE.test(mail)) errors.email = 'El correo no tiene un formato válido';
+    if (!inviteForm.roleId) errors.roleId = 'Selecciona un rol';
+    setInviteErrors(errors);
+    if (Object.values(errors).some(Boolean)) return;
+
+    setInviteSaving(true);
+    try {
+      await usersService.createInvitation({
+        ...inviteForm,
+        email: mail,
+        firstName: inviteForm.firstName.trim(),
+        lastName: inviteForm.lastName.trim(),
+      });
+      setInviteVisible(false);
+      toast.success('Invitación enviada al correo indicado');
+      loadInvites();
+    } catch (err) {
+      const apiError = toApiError(err);
+      setInviteErrors({
+        email: apiError.fieldError('email'),
+        roleId: apiError.fieldError('roleId'),
+        firstName: apiError.fieldError('firstName'),
+        lastName: apiError.fieldError('lastName'),
+        form: apiError.message,
+      });
+    } finally {
+      setInviteSaving(false);
+    }
+  };
+
+  const revokeInvite = async () => {
+    if (!toRevoke) return;
+    setRevoking(true);
+    try {
+      await usersService.revokeInvitation(toRevoke._id);
+      setToRevoke(null);
+      toast.success('Invitación revocada');
+      loadInvites();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setRevoking(false);
+    }
+  };
 
   /** Protección: nadie edita ni desactiva su propia cuenta desde esta pantalla. */
   const isSelf = (row: User) => row._id === user?.id;
@@ -236,10 +333,16 @@ export default function UsuariosScreen() {
     {
       key: 'status',
       label: 'Estado',
-      width: 110,
+      width: 150,
       render: (row) => {
         const info = STATUS_BADGES[row.status];
-        return <Badge label={info.label} tone={info.tone} />;
+        const pendingVerify = row.verificationRequired && !row.emailVerifiedAt;
+        return (
+          <View style={styles.statusCell}>
+            <Badge label={info.label} tone={info.tone} />
+            {pendingVerify ? <Badge label="Sin verificar" tone="warning" /> : null}
+          </View>
+        );
       },
     },
     {
@@ -273,7 +376,12 @@ export default function UsuariosScreen() {
         title="Usuarios"
         subtitle={`${list.total} ${list.total === 1 ? 'usuario registrado' : 'usuarios registrados'}`}
         actions={
-          can('users.create') ? <Button title="Nuevo usuario" onPress={openCreate} /> : undefined
+          can('users.create') ? (
+            <View style={styles.headerActions}>
+              <Button title="Invitar usuario" variant="secondary" onPress={openInvite} />
+              <Button title="Nuevo usuario" onPress={openCreate} />
+            </View>
+          ) : undefined
         }
       />
 
@@ -313,6 +421,56 @@ export default function UsuariosScreen() {
           </>
         )}
       </Card>
+
+      {/* Invitaciones de registro pendientes (sólo con users.read). */}
+      {can('users.read') ? (
+        <Card>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>Invitaciones pendientes</Text>
+          <Text style={[styles.sectionHint, { color: c.textMuted }]}>
+            El rol y la empresa los eliges tú: la cuenta nueva queda atada a esta empresa y no
+            podrá autoasignarse privilegios. El registro sólo se habilita con proveedor de correo
+            real configurado.
+          </Text>
+
+          {invitesLoading && invites.length === 0 ? (
+            <LoadingState message="Cargando invitaciones…" />
+          ) : invitesError ? (
+            <ErrorState message={invitesError} onRetry={loadInvites} />
+          ) : invites.length === 0 ? (
+            <EmptyState
+              title="Sin invitaciones pendientes"
+              message="Las invitaciones creadas aparecerán aquí hasta que se usen o caduquen."
+            />
+          ) : (
+            <View style={styles.inviteList}>
+              {invites.map((inv) => (
+                <View
+                  key={inv._id}
+                  style={[styles.inviteRow, { borderColor: c.border }]}
+                >
+                  <View style={{ flex: 1, minWidth: 200 }}>
+                    <Text style={{ color: c.text, fontSize: 14, fontWeight: '600' }}>
+                      {`${inv.firstName} ${inv.lastName}`.trim()}
+                    </Text>
+                    <Text style={{ color: c.textMuted, fontSize: 13 }}>{inv.email}</Text>
+                    <Text style={{ color: c.textLight, fontSize: 12 }}>
+                      Caduca: {formatDateTime(inv.expiresAt)}
+                    </Text>
+                  </View>
+                  {can('users.update') ? (
+                    <Button
+                      title="Revocar"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => setToRevoke(inv)}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          )}
+        </Card>
+      ) : null}
 
       {/* Formulario crear/editar */}
       <Modal visible={formVisible} transparent animationType="fade" onRequestClose={() => setFormVisible(false)}>
@@ -413,6 +571,103 @@ export default function UsuariosScreen() {
         onConfirm={() => void deactivate()}
         onCancel={() => setToDeactivate(null)}
       />
+
+      {/* Formulario de invitación de registro */}
+      <Modal
+        visible={inviteVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setInviteVisible(false)}
+      >
+        <Pressable
+          style={[styles.backdrop, { backgroundColor: c.overlay }]}
+          onPress={() => setInviteVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.formWrap}
+          >
+            <Pressable style={[styles.form, { backgroundColor: c.card, borderColor: c.border }]}>
+              <Text style={[styles.formTitle, { color: c.text }]}>Invitar usuario</Text>
+
+              {inviteErrors.form ? (
+                <View style={[styles.errorBox, { backgroundColor: c.dangerBg }]}>
+                  <Text style={{ color: c.danger, fontSize: 13, fontWeight: '600' }}>
+                    {inviteErrors.form}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.formRow}>
+                <Input
+                  label="Nombre *"
+                  value={inviteForm.firstName}
+                  onChangeText={(v) => setInviteForm((f) => ({ ...f, firstName: v }))}
+                  error={inviteErrors.firstName}
+                  placeholder="Nombre"
+                  editable={!inviteSaving}
+                  containerStyle={styles.formCol}
+                />
+                <Input
+                  label="Apellidos *"
+                  value={inviteForm.lastName}
+                  onChangeText={(v) => setInviteForm((f) => ({ ...f, lastName: v }))}
+                  error={inviteErrors.lastName}
+                  placeholder="Apellidos"
+                  editable={!inviteSaving}
+                  containerStyle={styles.formCol}
+                />
+              </View>
+              <Input
+                label="Email *"
+                value={inviteForm.email}
+                onChangeText={(v) => setInviteForm((f) => ({ ...f, email: v }))}
+                error={inviteErrors.email}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholder="correo@empresa.com"
+                hint="Recibirá el enlace de registro por correo"
+                editable={!inviteSaving}
+              />
+              <Select
+                label="Rol *"
+                value={inviteForm.roleId || null}
+                options={roleOptions}
+                onChange={(value) => setInviteForm((f) => ({ ...f, roleId: value }))}
+                error={inviteErrors.roleId}
+                placeholder="Selecciona un rol"
+                disabled={inviteSaving || roles.length === 0}
+              />
+
+              <View style={styles.formActions}>
+                <Button
+                  title="Cancelar"
+                  variant="ghost"
+                  onPress={() => setInviteVisible(false)}
+                  disabled={inviteSaving}
+                />
+                <Button
+                  title="Enviar invitación"
+                  onPress={() => void saveInvite()}
+                  loading={inviteSaving}
+                />
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
+
+      {/* Confirmación de revocación de invitación */}
+      <ConfirmDialog
+        visible={toRevoke !== null}
+        title="Revocar invitación"
+        message={`Se revocará la invitación de "${toRevoke ? toRevoke.email : ''}": el enlace dejará de funcionar y no se podrá completar el registro.`}
+        confirmLabel="Revocar"
+        destructive
+        loading={revoking}
+        onConfirm={() => void revokeInvite()}
+        onCancel={() => setToRevoke(null)}
+      />
     </ScrollView>
   );
 }
@@ -421,6 +676,20 @@ const styles = StyleSheet.create({
   wrap: { padding: 20, paddingBottom: 40 },
   toolbar: { flexDirection: 'row', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 },
   rowActions: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  statusCell: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' },
+  headerActions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  sectionTitle: { fontSize: 16, fontWeight: '800' },
+  sectionHint: { fontSize: 12, lineHeight: 17 },
+  inviteList: { gap: 10 },
+  inviteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorBox: { borderRadius: 10, padding: 12 },
   cellText: { fontSize: 14 },
   cellMuted: { fontSize: 13, color: '#64748b' },
   backdrop: { flex: 1, justifyContent: 'center', padding: 16 },
