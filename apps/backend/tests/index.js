@@ -13,7 +13,7 @@
  *
  * Solución SIN tocar tests/run.js (prohibido por el encargo): este archivo
  * permite que la ruta `tests/` resuelva como entrada (tests/index.js) y
- * carga las 8 suites *.test.js. node:test las registra todas en el mismo
+ * carga las suites *.test.js. node:test las registra todas en el mismo
  * proceso y las ejecuta EN ORDEN Y SERIALIZADAS (cada describe ejecuta su
  * propio before(setup) con dropDatabase, por lo que el aislamiento entre
  * archivos se mantiene igual que con un proceso por archivo).
@@ -22,9 +22,10 @@
  * tests/…/*.test.js (un proceso por archivo).
  */
 
-// registration.test DEBE ir PRIMERO: fija MAIL_PROVIDER=test y
-// REGISTRATION_ENABLED=true en su código inicial, ANTES de que cualquier
-// require cargue src/config/env (que se cachea en el primer require).
+// registration.test DEBE ser la primera suite que carga la app: fija
+// MAIL_PROVIDER=test y REGISTRATION_ENABLED=true antes de src/config/env.
+require('./probe-db-safety.test');
+require('./db-safety.test');
 require('./registration.test');
 require('./public-registration.test');
 require('./security.test');

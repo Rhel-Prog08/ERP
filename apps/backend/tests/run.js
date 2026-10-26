@@ -6,6 +6,15 @@
  * (el prefijo de shell NODE_ENV=... no funciona en cmd.exe de Windows).
  */
 const { spawnSync } = require('child_process');
+const { getAuthorizedTestUri } = require('./db-safety');
+
+let testMongoUri;
+try {
+  testMongoUri = getAuthorizedTestUri();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', 'tests/'], {
   stdio: 'inherit',
@@ -13,7 +22,7 @@ const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', 't
     ...process.env,
     NODE_ENV: 'test',
     PORT: '4001',
-    MONGO_URI: 'mongodb://127.0.0.1:27017/erp_test?replicaSet=rs0',
+    MONGO_URI: testMongoUri,
     JWT_SECRET: process.env.JWT_SECRET || 'test_secret_solo_para_pruebas_a1b2c3d4',
     JWT_EXPIRES_IN: '10m',
     REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET || 'test_refresh_solo_para_pruebas_e5f6g7h8',

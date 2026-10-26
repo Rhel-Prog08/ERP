@@ -50,6 +50,10 @@ const { StockBalance, StockMovement } = require('../src/modules/inventory/model'
 const AuditLog = require('../src/modules/audit/model');
 const Notification = require('../src/modules/notifications/model');
 const { Sequence } = require('../src/database/sequence');
+const {
+  getAuthorizedTestUri,
+  runDestructiveTestOperation,
+} = require('./db-safety');
 
 /** Todos los modelos con índices declarados (se recreen tras dropDatabase). */
 const MODELS = [
@@ -72,9 +76,14 @@ const VENTAS_PASSWORD = 'Ventas12345!';
  * producción: así la atomicidad que se predica en las pruebas es la real.
  */
 async function setup() {
-  await connectDB(process.env.MONGO_URI);
+  const testMongoUri = getAuthorizedTestUri();
+  await connectDB(testMongoUri);
 
-  await mongoose.connection.db.dropDatabase();
+  await runDestructiveTestOperation({
+    uri: testMongoUri,
+    connection: mongoose.connection,
+    operation: () => mongoose.connection.db.dropDatabase(),
+  });
 
   // dropDatabase borró colecciones E índices: recreamos los declarados
   // (unicidad de SKU+empresa, email, secuencias…) ANTES de los fixtures.

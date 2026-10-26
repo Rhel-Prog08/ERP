@@ -19,10 +19,10 @@
 
 const request = require('supertest');
 
-const app = require('../../src/app');
-const { connectDB, disconnectDB } = require('../../src/config/db');
-const Company = require('../../src/modules/companies/model');
-const User = require('../../src/modules/users/model');
+const {
+  assertAuthorizedTestConnection,
+  getAuthorizedTestUri,
+} = require('../db-safety');
 
 const REGCO_MAX = 2;
 const PROBE_EMAIL = 'probe.regco.limit@ejemplo.mx';
@@ -39,40 +39,59 @@ function check(desc, cond, extra) {
   }
 }
 
-async function main() {
-  await connectDB();
+async function runProbe(dependencies = {}) {
+  const environment = dependencies.environment || process.env;
+  const testMongoUri = getAuthorizedTestUri(environment);
+  if (!dependencies.environment) process.env.MONGO_URI = testMongoUri;
 
-  // Cuerpo inválido a propósito (faltan companyName/firstName/…): nunca crea
-  // documentos, pero consume el cupo del limitador igual que una petición real.
-  const statuses = [];
-  for (let i = 0; i < REGCO_MAX + 1; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const res = await request(app)
-      .post('/api/v1/auth/register-company')
-      .send({ email: PROBE_EMAIL, password: 'Fuerza123!' });
-    statuses.push(res.status);
-  }
-  check('register-company: bajo el límite responde 400 de validación (no 429)',
-    statuses.slice(0, REGCO_MAX).every((s) => s === 400), JSON.stringify(statuses));
-  check('register-company: al exceder responde 429 RATE_LIMITED',
-    statuses[REGCO_MAX] === 429, JSON.stringify(statuses));
-  check('register-company: ninguna empresa ni cuenta creadas por el probe',
-    (await Company.countDocuments({ email: PROBE_EMAIL })) === 0 &&
-      (await User.countDocuments({ email: PROBE_EMAIL })) === 0);
+  const app = dependencies.app || require('../../src/app');
+  const { connectDB, disconnectDB } = dependencies.connectDB
+    ? dependencies
+    : require('../../src/config/db');
+  const Company = dependencies.Company || require('../../src/modules/companies/model');
+  const User = dependencies.User || require('../../src/modules/users/model');
+  const probeRequest = dependencies.request || request;
 
-  await disconnectDB();
-  if (failures.length > 0) {
+  let connectionAttempted = false;
+  try {
+    connectionAttempted = true;
+    const connection = await connectDB(testMongoUri);
+    assertAuthorizedTestConnection(testMongoUri, connection);
+
+    // Cuerpo inválido a propósito (faltan companyName/firstName/…): nunca crea
+    // documentos, pero consume el cupo del limitador igual que una petición real.
+    const statuses = [];
+    for (let i = 0; i < REGCO_MAX + 1; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const res = await probeRequest(app)
+        .post('/api/v1/auth/register-company')
+        .send({ email: PROBE_EMAIL, password: 'Fuerza123!' });
+      statuses.push(res.status);
+    }
+    check('register-company: bajo el límite responde 400 de validación (no 429)',
+      statuses.slice(0, REGCO_MAX).every((s) => s === 400), JSON.stringify(statuses));
+    check('register-company: al exceder responde 429 RATE_LIMITED',
+      statuses[REGCO_MAX] === 429, JSON.stringify(statuses));
+    check('register-company: ninguna empresa ni cuenta creadas por el probe',
+      (await Company.countDocuments({ email: PROBE_EMAIL })) === 0 &&
+        (await User.countDocuments({ email: PROBE_EMAIL })) === 0);
+
+    if (failures.length > 0) {
+      throw new Error(`PROBE_RESULT_FAIL ${failures.length} fallo(s)`);
+    }
     // eslint-disable-next-line no-console
-    console.log(`PROBE_RESULT_FAIL ${failures.length} fallo(s)`);
-    process.exit(1);
+    console.log('PROBE_RESULT_OK');
+  } finally {
+    if (connectionAttempted) await disconnectDB();
   }
-  // eslint-disable-next-line no-console
-  console.log('PROBE_RESULT_OK');
-  process.exit(0);
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.log(`PROBE_RESULT_FAIL excepción: ${err && err.stack}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  runProbe().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.log(`PROBE_RESULT_FAIL excepción: ${err && err.stack}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { runProbe };

@@ -24,6 +24,14 @@
  */
 
 const request = require('supertest');
+const mongoose = require('mongoose');
+const {
+  assertAuthorizedTestConnection,
+  getAuthorizedTestUri,
+  runDestructiveTestOperation,
+} = require('../db-safety');
+const TEST_MONGO_URI = getAuthorizedTestUri();
+process.env.MONGO_URI = TEST_MONGO_URI;
 
 const app = require('../../src/app');
 const { connectDB, disconnectDB } = require('../../src/config/db');
@@ -86,17 +94,35 @@ async function makeAdmin() {
 }
 
 async function main() {
-  await connectDB();
+  await connectDB(TEST_MONGO_URI);
 
   /* Limpieza de fixtures de ejeciones previas (probe idempotente). */
+  const testConnection = mongoose.connection;
+  assertAuthorizedTestConnection(TEST_MONGO_URI, testConnection);
   const prev = await Company.find({ taxId: 'P-11111111' }).select('_id').lean();
   const ids = prev.map((c) => c._id);
   if (ids.length > 0) {
-    await Role.deleteMany({ companyId: { $in: ids } });
-    await Company.deleteMany({ _id: { $in: ids } });
+    await runDestructiveTestOperation({
+      uri: TEST_MONGO_URI,
+      connection: testConnection,
+      operation: () => Role.deleteMany({ companyId: { $in: ids } }),
+    });
+    await runDestructiveTestOperation({
+      uri: TEST_MONGO_URI,
+      connection: testConnection,
+      operation: () => Company.deleteMany({ _id: { $in: ids } }),
+    });
   }
-  await User.deleteMany({ email: 'probe-admin@ejemplo.mx' });
-  await Invitation.deleteMany({ email: 'sin-proveedor@ejemplo.mx' });
+  await runDestructiveTestOperation({
+    uri: TEST_MONGO_URI,
+    connection: testConnection,
+    operation: () => User.deleteMany({ email: 'probe-admin@ejemplo.mx' }),
+  });
+  await runDestructiveTestOperation({
+    uri: TEST_MONGO_URI,
+    connection: testConnection,
+    operation: () => Invitation.deleteMany({ email: 'sin-proveedor@ejemplo.mx' }),
+  });
 
   /* --- /auth/register debe estar bloqueado en AMBOS modos --- */
   const reg = await request(app).post('/api/v1/auth/register').send(REGISTER_BODY);

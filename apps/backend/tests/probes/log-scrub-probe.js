@@ -20,6 +20,14 @@
  * Imprime ASSERT_OK/ASSERT_FAIL y sale con 0/1.
  */
 
+const {
+  assertAuthorizedTestConnection,
+  getAuthorizedTestUri,
+  runDestructiveTestOperation,
+} = require('../db-safety');
+const TEST_MONGO_URI = getAuthorizedTestUri();
+process.env.MONGO_URI = TEST_MONGO_URI;
+
 /* ---------- captura de logs ANTES de cualquier require de src/ ---------- */
 const captured = [];
 const origOut = process.stdout.write.bind(process.stdout);
@@ -32,6 +40,7 @@ function say(line) {
 }
 
 const request = require('supertest');
+const mongoose = require('mongoose');
 const app = require('../../src/app');
 const { connectDB, disconnectDB } = require('../../src/config/db');
 const Company = require('../../src/modules/companies/model');
@@ -65,18 +74,36 @@ function tokenFromLastMail(kind) {
 }
 
 async function main() {
-  await connectDB();
+  await connectDB(TEST_MONGO_URI);
   drainTestOutbox();
+  const testConnection = mongoose.connection;
+  assertAuthorizedTestConnection(TEST_MONGO_URI, testConnection);
 
   /* Limpieza de fixtures de ejeciones previas (probe idempotente). */
   const prevCompanies = await Company.find({ taxId: 'L-33333333' }).select('_id').lean();
   const prevIds = prevCompanies.map((c) => c._id);
   if (prevIds.length > 0) {
-    await Role.deleteMany({ companyId: { $in: prevIds } });
-    await Company.deleteMany({ _id: { $in: prevIds } });
+    await runDestructiveTestOperation({
+      uri: TEST_MONGO_URI,
+      connection: testConnection,
+      operation: () => Role.deleteMany({ companyId: { $in: prevIds } }),
+    });
+    await runDestructiveTestOperation({
+      uri: TEST_MONGO_URI,
+      connection: testConnection,
+      operation: () => Company.deleteMany({ _id: { $in: prevIds } }),
+    });
   }
-  await User.deleteMany({ email: { $in: ['logscrub-admin@ejemplo.mx', 'logscrub.user@ejemplo.mx'] } });
-  await Invitation.deleteMany({ email: 'logscrub.user@ejemplo.mx' });
+  await runDestructiveTestOperation({
+    uri: TEST_MONGO_URI,
+    connection: testConnection,
+    operation: () => User.deleteMany({ email: { $in: ['logscrub-admin@ejemplo.mx', 'logscrub.user@ejemplo.mx'] } }),
+  });
+  await runDestructiveTestOperation({
+    uri: TEST_MONGO_URI,
+    connection: testConnection,
+    operation: () => Invitation.deleteMany({ email: 'logscrub.user@ejemplo.mx' }),
+  });
 
   /* ---------------------------- fixtures ----------------------------- */
   const company = await Company.create({

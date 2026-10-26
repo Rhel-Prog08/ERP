@@ -21,8 +21,10 @@
 
 const request = require('supertest');
 
-const app = require('../../src/app');
-const { connectDB, disconnectDB } = require('../../src/config/db');
+const {
+  assertAuthorizedTestConnection,
+  getAuthorizedTestUri,
+} = require('../db-safety');
 
 const REG_MAX = 2;
 const VER_MAX = 2;
@@ -41,63 +43,80 @@ function check(desc, cond, extra) {
   }
 }
 
-async function burst(path, body, times) {
-  const statuses = [];
-  for (let i = 0; i < times; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const res = await request(app).post(path).send(body);
-    statuses.push(res.status);
-  }
-  return statuses;
-}
+async function runProbe(dependencies = {}) {
+  const environment = dependencies.environment || process.env;
+  const testMongoUri = getAuthorizedTestUri(environment);
+  if (!dependencies.environment) process.env.MONGO_URI = testMongoUri;
 
-async function main() {
-  await connectDB();
+  const app = dependencies.app || require('../../src/app');
+  const { connectDB, disconnectDB } = dependencies.connectDB
+    ? dependencies
+    : require('../../src/config/db');
+  const probeRequest = dependencies.request || request;
 
-  /* /auth/register: válidas pasan (400), excedentes → 429 */
-  const reg = await burst('/api/v1/auth/register', {
-    inviteToken: 'token-basura-suficientemente-largo-000000',
-    firstName: 'X',
-    lastName: 'Y',
-    email: 'probe.reg@ejemplo.mx',
-    password: 'Fuerza123!',
-    passwordConfirm: 'Fuerza123!',
-  }, REG_MAX + 1);
-  check('register: bajo el límite responde 4xx de servicio (no 429)',
-    reg.slice(0, REG_MAX).every((s) => s >= 400 && s < 500 && s !== 429), JSON.stringify(reg));
-  check('register: al exceder responde 429 RATE_LIMITED', reg[REG_MAX] === 429, JSON.stringify(reg));
+  let connectionAttempted = false;
+  try {
+    connectionAttempted = true;
+    const connection = await connectDB(testMongoUri);
+    assertAuthorizedTestConnection(testMongoUri, connection);
 
-  /* /auth/verify-email */
-  const ver = await burst('/api/v1/auth/verify-email', { token: 'token-basura-suficiente-0000000000' }, VER_MAX + 1);
-  check('verify-email: bajo el límite responde 400 (no 429)',
-    ver.slice(0, VER_MAX).every((s) => s === 400), JSON.stringify(ver));
-  check('verify-email: al exceder responde 429 RATE_LIMITED', ver[VER_MAX] === 429, JSON.stringify(ver));
+    async function probeBurst(path, body, times) {
+      const statuses = [];
+      for (let i = 0; i < times; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const res = await probeRequest(app).post(path).send(body);
+        statuses.push(res.status);
+      }
+      return statuses;
+    }
 
-  /* /auth/resend-verification */
-  const res1 = await burst('/api/v1/auth/resend-verification', { email: 'probe.resend@ejemplo.mx' }, RES_MAX + 1);
-  check('resend: bajo el límite responde 200 (no 429)',
-    res1.slice(0, RES_MAX).every((s) => s === 200), JSON.stringify(res1));
-  check('resend: al exceder responde 429 RATE_LIMITED', res1[RES_MAX] === 429, JSON.stringify(res1));
+    /* /auth/register: válidas pasan (400), excedentes → 429 */
+    const reg = await probeBurst('/api/v1/auth/register', {
+      inviteToken: 'token-basura-suficientemente-largo-000000',
+      firstName: 'X',
+      lastName: 'Y',
+      email: 'probe.reg@ejemplo.mx',
+      password: 'Fuerza123!',
+      passwordConfirm: 'Fuerza123!',
+    }, REG_MAX + 1);
+    check('register: bajo el límite responde 4xx de servicio (no 429)',
+      reg.slice(0, REG_MAX).every((s) => s >= 400 && s < 500 && s !== 429), JSON.stringify(reg));
+    check('register: al exceder responde 429 RATE_LIMITED', reg[REG_MAX] === 429, JSON.stringify(reg));
 
-  /* /auth/login: uso normal NO debe recibir 429 por debajo del máximo */
-  const log = await burst('/api/v1/auth/login', { email: 'no.existe@ejemplo.mx', password: 'Mal12345!' }, AUTH_MAX + 1);
-  check('login: uso normal bajo el máximo responde 401 (nunca 429)',
-    log.slice(0, AUTH_MAX).every((s) => s === 401), JSON.stringify(log));
-  check('login: al exceder responde 429 RATE_LIMITED', log[AUTH_MAX] === 429, JSON.stringify(log));
+    /* /auth/verify-email */
+    const ver = await probeBurst('/api/v1/auth/verify-email', { token: 'token-basura-suficiente-0000000000' }, VER_MAX + 1);
+    check('verify-email: bajo el límite responde 400 (no 429)',
+      ver.slice(0, VER_MAX).every((s) => s === 400), JSON.stringify(ver));
+    check('verify-email: al exceder responde 429 RATE_LIMITED', ver[VER_MAX] === 429, JSON.stringify(ver));
 
-  await disconnectDB();
-  if (failures.length > 0) {
+    /* /auth/resend-verification */
+    const res1 = await probeBurst('/api/v1/auth/resend-verification', { email: 'probe.resend@ejemplo.mx' }, RES_MAX + 1);
+    check('resend: bajo el límite responde 200 (no 429)',
+      res1.slice(0, RES_MAX).every((s) => s === 200), JSON.stringify(res1));
+    check('resend: al exceder responde 429 RATE_LIMITED', res1[RES_MAX] === 429, JSON.stringify(res1));
+
+    /* /auth/login: uso normal NO debe recibir 429 por debajo del máximo */
+    const log = await probeBurst('/api/v1/auth/login', { email: 'no.existe@ejemplo.mx', password: 'Mal12345!' }, AUTH_MAX + 1);
+    check('login: uso normal bajo el máximo responde 401 (nunca 429)',
+      log.slice(0, AUTH_MAX).every((s) => s === 401), JSON.stringify(log));
+    check('login: al exceder responde 429 RATE_LIMITED', log[AUTH_MAX] === 429, JSON.stringify(log));
+
+    if (failures.length > 0) {
+      throw new Error(`PROBE_RESULT_FAIL ${failures.length} fallo(s)`);
+    }
     // eslint-disable-next-line no-console
-    console.log(`PROBE_RESULT_FAIL ${failures.length} fallo(s)`);
-    process.exit(1);
+    console.log('PROBE_RESULT_OK');
+  } finally {
+    if (connectionAttempted) await disconnectDB();
   }
-  // eslint-disable-next-line no-console
-  console.log('PROBE_RESULT_OK');
-  process.exit(0);
 }
 
-main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.log(`PROBE_RESULT_FAIL excepción: ${err && err.stack}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  runProbe().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.log(`PROBE_RESULT_FAIL excepción: ${err && err.stack}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { runProbe };
