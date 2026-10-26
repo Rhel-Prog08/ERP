@@ -108,7 +108,7 @@ describe('MULTIEMPRESA — aprovisionamiento y aislamiento entre empresas', () =
     const resB = await api
       .post('/api/v1/customers')
       .set('Authorization', `Bearer ${tokenB}`)
-      .send({ name: 'Cliente Beta' });
+      .send({ name: 'Cliente Beta', email: 'beta@clientes.test', phone: '5511223303' });
     assertOk(resB, 201);
     assert.equal(resB.body.data.companyId, idB);
     customerB = String(resB.body.data._id);
@@ -116,7 +116,7 @@ describe('MULTIEMPRESA — aprovisionamiento y aislamiento entre empresas', () =
     const resA = await api
       .post('/api/v1/customers')
       .set('Authorization', `Bearer ${tokenA}`)
-      .send({ name: 'Cliente Alfa' });
+      .send({ name: 'Cliente Alfa', email: 'alfa@clientes.test', phone: '5511223304' });
     assertOk(resA, 201);
     assert.equal(resA.body.data.companyId, fx.companyId);
     customerA = String(resA.body.data._id);

@@ -131,7 +131,7 @@ describe('E2E — escenario completo del negocio (spec §33)', () => {
     const sup = await api
       .post('/api/v1/suppliers')
       .set('Authorization', `Bearer ${tokenE}`)
-      .send({ name: 'Proveedor E2E', email: 'prov@e2e.test' });
+      .send({ name: 'Proveedor E2E', email: 'prov@e2e.test', phone: '5511223301' });
     assertOk(sup, 201);
     assert.equal(sup.body.data.companyId, idE);
     supplierId = String(sup.body.data._id);
@@ -206,7 +206,7 @@ describe('E2E — escenario completo del negocio (spec §33)', () => {
     const res = await api
       .post('/api/v1/customers')
       .set('Authorization', `Bearer ${tokenE}`)
-      .send({ name: 'Cliente E2E', email: 'cliente@e2e.test' });
+      .send({ name: 'Cliente E2E', email: 'cliente@e2e.test', phone: '5511223302' });
 
     assertOk(res, 201);
     assert.equal(res.body.data.companyId, idE);

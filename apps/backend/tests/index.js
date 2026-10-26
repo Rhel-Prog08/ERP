@@ -29,6 +29,8 @@ require('./products.test');
 require('./inventory.test');
 require('./purchases.test');
 require('./sales.test');
+require('./customers.test');
+require('./suppliers.test');
 require('./multiempresa.test');
 require('./e2e.test');
 require('./bootstrap.test');

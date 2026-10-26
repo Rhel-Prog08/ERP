@@ -97,7 +97,7 @@ describe('VENTAS — confirmación, reversa y aislamiento', () => {
     const cust = await api
       .post('/api/v1/customers')
       .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Cliente Prueba', email: 'cliente@prueba.test' });
+      .send({ name: 'Cliente Prueba', email: 'cliente@prueba.test', phone: '5511223306' });
     assertOk(cust, 201);
     customerId = String(cust.body.data._id);
 
