@@ -38,6 +38,8 @@ const { hashToken } = require('../src/utils/tokens');
 const { drainTestOutbox } = require('../src/utils/mailer');
 const { DEFAULT_ROLES, ROLE_PERMISSIONS } = require('../src/config/constants');
 const { RESEND_GENERIC_MESSAGE } = require('../src/modules/registration/service');
+const { transactionsSupported, withTransaction } = require('../src/config/db');
+const companiesService = require('../src/modules/companies/service');
 
 const REGISTER = '/api/v1/auth/register-company';
 const VERIFY = '/api/v1/auth/verify-email';
@@ -78,6 +80,82 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
 
   after(teardown);
 
+  it('el índice parcial permite varios ownerUserId ausentes o null y mantiene unicidad para ObjectId', async () => {
+    const indexes = await Company.collection.indexes();
+    const ownerIndex = indexes.find((index) => index.key.ownerUserId === 1);
+    assert.ok(ownerIndex, 'el índice ownerUserId debe estar creado');
+    assert.equal(ownerIndex.unique, true);
+    assert.deepEqual(ownerIndex.partialFilterExpression, {
+      ownerUserId: { $type: 'objectId' },
+    });
+    assert.equal(ownerIndex.sparse, undefined);
+
+    const absentOne = await Company.create({ name: 'Sin propietario uno' });
+    const absentTwo = await Company.create({ name: 'Sin propietario dos' });
+    const nullOne = await Company.create({ name: 'Propietario nulo uno', ownerUserId: null });
+    const nullTwo = await Company.create({ name: 'Propietario nulo dos', ownerUserId: null });
+    assert.ok(absentOne && absentTwo && nullOne && nullTwo);
+    assert.equal(absentOne.ownerUserId, undefined);
+    assert.equal(absentTwo.ownerUserId, undefined);
+    assert.equal(nullOne.ownerUserId, null);
+    assert.equal(nullTwo.ownerUserId, null);
+  });
+
+  it('la asignación válida exige usuario de la empresa y bloquea segunda propiedad', async () => {
+    await withTransaction((session) =>
+      companiesService.assignOwner(fx.companyId, fx.admin.id, session)
+    );
+    const company = await Company.findById(fx.companyId).lean();
+    assert.equal(String(company.ownerUserId), fx.admin.id);
+    assert.equal(String((await User.findById(fx.admin.id).lean()).companyId), fx.companyId);
+
+    const secondCompany = await Company.create({ name: 'Segunda empresa del propietario' });
+    await assert.rejects(
+      withTransaction((session) =>
+        companiesService.assignOwner(secondCompany._id, fx.admin.id, session)
+      ),
+      /misma empresa/
+    );
+    assert.equal((await Company.findById(secondCompany._id).lean()).ownerUserId, undefined);
+  });
+
+  it('el índice parcial impide que el mismo usuario figure como propietario de dos empresas', async () => {
+    assert.equal(
+      String((await Company.findById(fx.companyId).lean()).ownerUserId),
+      fx.admin.id
+    );
+    await assert.rejects(
+      Company.create({ name: 'Segunda empresa del índice', ownerUserId: fx.admin.id }),
+      (err) => err && err.code === 11000
+    );
+    assert.equal(await Company.countDocuments({ name: 'Segunda empresa del índice' }), 0);
+  });
+
+  it('rechaza asignar como propietario un usuario de otra empresa', async () => {
+    const otherCompany = await Company.create({ name: 'Empresa de usuario ajeno' });
+    await assert.rejects(
+      withTransaction((session) =>
+        companiesService.assignOwner(otherCompany._id, fx.admin.id, session)
+      ),
+      /misma empresa/
+    );
+    assert.equal((await Company.findById(otherCompany._id).lean()).ownerUserId, undefined);
+  });
+
+  it('PATCH genérico ignora ownerUserId', async () => {
+    const previousOwner = (await Company.findById(fx.companyId).lean()).ownerUserId;
+    const token = await login(api, fx.admin.email, fx.admin.password);
+    const res = await api
+      .patch(`/api/v1/companies/${fx.companyId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ownerUserId: fx.admin.id, phone: '5512345678' });
+    assertOk(res, 200);
+
+    const company = await Company.findById(fx.companyId).lean();
+    assert.equal(company.phone, '5512345678');
+    assert.equal(String(company.ownerUserId || ''), String(previousOwner || ''));
+  });
+
   it('5.1 — crea empresa + administrador con aprovisionamiento completo y auditoría', async () => {
     const res = await api.post(REGISTER).send(regPayload());
     assertOk(res, 201);
@@ -109,6 +187,7 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
     assert.equal(admin.status, 'active');
     assert.equal(admin.verificationRequired, true, 'cuenta bloqueada hasta verificar');
     assert.equal(admin.emailVerifiedAt, null);
+    assert.equal(String(company.ownerUserId), String(admin._id), 'el primer usuario es el propietario explícito');
     assert.match(admin.password, /^\$2/, 'la contraseña vive hasheada con bcrypt');
     assert.notEqual(admin.password, 'Gamma1234!');
 
@@ -143,6 +222,7 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
       role: 'superadmin',
       emailVerifiedAt: new Date().toISOString(),
       verificationRequired: false,
+      ownerUserId: fx.admin.id,
     });
     assertOk(res, 201);
 
@@ -151,6 +231,7 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
     delta.companyId = String(deltaCompany._id);
 
     const admin = await User.findOne({ email: 'admin-delta@test.local' }).lean();
+    assert.equal(String(deltaCompany.ownerUserId), String(admin._id), 'el propietario es el usuario recién creado, no el valor inyectado');
     assert.notEqual(String(admin.companyId), fx.companyId, 'no puede entrar en la empresa Alfa');
     assert.equal(String(admin.companyId), delta.companyId, 'pertenece SÓLO a su empresa nueva');
     const role = await Role.findById(admin.roleId).lean();
@@ -159,6 +240,8 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
     assert.equal(admin.permissions, undefined, 'los usuarios no almacenan permisos propios');
     assert.equal(admin.emailVerifiedAt, null, 'la verificación no puede saltarse inyectando la fecha');
     assert.equal(admin.verificationRequired, true, 'el candado de verificación no puede desactivarse');
+    assert.equal(String(admin.companyId), String(deltaCompany._id), 'el usuario conserva una sola empresa');
+    assert.notEqual(String(deltaCompany.ownerUserId), fx.admin.id, 'una empresa no puede aceptar un propietario ajeno');
 
     const { token } = lastVerifyToken();
     delta.verifyToken = token;
@@ -194,6 +277,47 @@ describe('REGISTRO PÚBLICO MULTIEMPRESA — FASE H', () => {
       .send(regPayload({ email: 'otra3@test.local', password: 'SinNumeros', passwordConfirm: 'SinNumeros' }));
     assertError(noNumber, 400, 'VALIDATION_ERROR');
     assert.match(noNumber.body.error.details[0].message, /número/i);
+  });
+
+  it('5.9 — el fallo al guardar la propiedad revierte empresa, usuario y aprovisionamiento', async () => {
+    assert.equal(transactionsSupported(), true, 'esta prueba requiere el replica set local de pruebas');
+    const existingCounts = {
+      warehouses: await Warehouse.countDocuments(),
+      settings: await Settings.countDocuments(),
+      roles: await Role.countDocuments(),
+    };
+    const originalUpdateOne = Company.updateOne;
+    Company.updateOne = function updateOneWithOwnerFailure(filter, update, ...args) {
+      if (update && update.$set && update.$set.ownerUserId) {
+        throw new Error('fallo simulado al persistir propietario');
+      }
+      return originalUpdateOne.call(this, filter, update, ...args);
+    };
+
+    try {
+      const failed = await api.post(REGISTER).send(
+        regPayload({
+          companyName: 'Empresa con fallo de propietario',
+          firstName: 'Rollback',
+          lastName: 'Propietario',
+          email: 'rollback-owner@test.local',
+          password: 'Rollback1234!',
+          passwordConfirm: 'Rollback1234!',
+        })
+      );
+      assert.equal(failed.status, 500);
+      assert.equal(
+        await Company.exists({ name: 'Empresa con fallo de propietario' }),
+        null,
+        'la empresa debe revertirse junto con el propietario'
+      );
+      assert.equal(await User.exists({ email: 'rollback-owner@test.local' }), null);
+      assert.equal(await Warehouse.countDocuments(), existingCounts.warehouses);
+      assert.equal(await Settings.countDocuments(), existingCounts.settings);
+      assert.equal(await Role.countDocuments(), existingCounts.roles);
+    } finally {
+      Company.updateOne = originalUpdateOne;
+    }
   });
 
   it('5.3 — login bloqueado antes de verificar (registro provisional seguro)', async () => {

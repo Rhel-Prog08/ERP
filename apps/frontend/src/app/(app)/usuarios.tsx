@@ -31,6 +31,7 @@ import { SearchInput } from '../../components/ui/SearchInput';
 import { Pagination } from '../../components/ui/Pagination';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/States';
+import { activeRoles, loadRoleCatalog, roleAvailability } from '../../utils/roleOptions.mjs';
 
 /** La política de contraseñas del backend exige mínimo 8 caracteres. */
 const MIN_PASSWORD_LENGTH = 8;
@@ -80,20 +81,33 @@ export default function UsuariosScreen() {
 
   // Catálogo de roles para el Select del formulario y para resolver roleId string.
   const [roles, setRoles] = useState<Role[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  const [rolesError, setRolesError] = useState<string | null>(null);
+  const [rolesReloadToken, setRolesReloadToken] = useState(0);
+  const reloadRoles = useCallback(() => {
+    setRolesLoading(true);
+    setRolesError(null);
+    setRolesReloadToken((token) => token + 1);
+  }, []);
+
   React.useEffect(() => {
     let active = true;
-    rolesService
-      .list()
-      .then((data) => {
-        if (active) setRoles(data);
+    void loadRoleCatalog(
+      () => rolesService.list(),
+      (error) => toApiError(error).message
+    )
+      .then((result) => {
+        if (!active) return;
+        setRoles(result.roles);
+        setRolesError(result.error);
       })
-      .catch(() => {
-        // Sin roles.read el formulario de alta lo validará como campo obligatorio.
+      .finally(() => {
+        if (active) setRolesLoading(false);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [rolesReloadToken]);
 
   const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -143,7 +157,7 @@ export default function UsuariosScreen() {
       firstName: '',
       lastName: '',
       email: '',
-      roleId: roles.length === 1 ? roles[0]._id : '',
+      roleId: activeRoleList.length === 1 ? activeRoleList[0]._id : '',
     });
     setInviteErrors({});
     setInviteVisible(true);
@@ -205,7 +219,7 @@ export default function UsuariosScreen() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, roleId: roles.length === 1 ? roles[0]._id : '' });
+    setForm({ ...EMPTY_FORM, roleId: activeRoleList.length === 1 ? activeRoleList[0]._id : '' });
     setFieldErrors({});
     setFormVisible(true);
   };
@@ -215,6 +229,7 @@ export default function UsuariosScreen() {
       toast.error('No puedes editar tu propia cuenta desde esta pantalla');
       return;
     }
+    const roleId = typeof row.roleId === 'object' && row.roleId !== null ? row.roleId._id : row.roleId;
     setEditing(row);
     setForm({
       firstName: row.firstName,
@@ -222,7 +237,7 @@ export default function UsuariosScreen() {
       email: row.email,
       password: '',
       newPassword: '',
-      roleId: typeof row.roleId === 'object' && row.roleId !== null ? row.roleId._id : row.roleId,
+      roleId,
       status: row.status,
     });
     setFieldErrors({});
@@ -244,7 +259,19 @@ export default function UsuariosScreen() {
     if (!form.lastName.trim()) errs.lastName = 'El apellido es obligatorio';
     if (!form.email.trim()) errs.email = 'El email es obligatorio';
     else if (!EMAIL_RE.test(form.email.trim())) errs.email = 'Introduce un email válido';
-    if (!form.roleId) errs.roleId = 'Selecciona un rol';
+    const originalRoleId = editing
+      ? typeof editing.roleId === 'object' && editing.roleId !== null
+        ? editing.roleId._id
+        : editing.roleId
+      : null;
+    if (!form.roleId && !editing) errs.roleId = 'Selecciona un rol';
+    if (
+      editing &&
+      form.roleId !== originalRoleId &&
+      roleAvailability(activeRoleList, form.roleId) !== 'active'
+    ) {
+      errs.roleId = 'Selecciona un rol activo';
+    }
     if (!editing && form.password.length < MIN_PASSWORD_LENGTH) {
       errs.password = `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`;
     }
@@ -263,9 +290,9 @@ export default function UsuariosScreen() {
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
           email: form.email.trim(),
-          roleId: form.roleId,
           status: form.status,
         };
+        if (form.roleId !== originalRoleId && form.roleId) payload.roleId = form.roleId;
         if (form.newPassword.trim()) payload.newPassword = form.newPassword.trim();
         await usersService.update(editing._id, payload);
         toast.success('Usuario actualizado');
@@ -313,7 +340,8 @@ export default function UsuariosScreen() {
     }
   };
 
-  const roleOptions = roles.map((r) => ({ value: r._id, label: r.name }));
+  const activeRoleList = activeRoles(roles);
+  const roleOptions = activeRoleList.map((r) => ({ value: r._id, label: r.name }));
 
   const columns: TableColumn<User>[] = [
     {
@@ -384,6 +412,12 @@ export default function UsuariosScreen() {
           ) : undefined
         }
       />
+
+      {rolesError ? (
+        <Card>
+          <ErrorState message={rolesError} onRetry={reloadRoles} />
+        </Card>
+      ) : null}
 
       <Card>
         <View style={styles.toolbar}>
@@ -541,8 +575,24 @@ export default function UsuariosScreen() {
                 onChange={(value) => setForm((f) => ({ ...f, roleId: value }))}
                 error={fieldErrors.roleId}
                 placeholder="Selecciona un rol"
-                disabled={saving || roles.length === 0}
+                disabled={saving || rolesLoading || Boolean(rolesError)}
               />
+              {rolesError ? <ErrorState message={rolesError} onRetry={reloadRoles} /> : null}
+              {!rolesLoading && !rolesError && activeRoleList.length === 0 ? (
+                <Text style={[styles.cellMuted, { color: c.danger }]}>
+                  No hay roles activos disponibles. Activa un rol en la pantalla de Roles para asignarlo.
+                </Text>
+              ) : null}
+              {editing &&
+              form.roleId ===
+                (typeof editing.roleId === 'object' && editing.roleId !== null
+                  ? editing.roleId._id
+                  : editing.roleId) &&
+              roleAvailability(roles, form.roleId) === 'inactive' ? (
+                <Text style={[styles.cellMuted, { color: c.danger }]}>
+                  El rol actual “{roleName(editing, roles)}” fue desactivado. Selecciona un rol activo para cambiarlo.
+                </Text>
+              ) : null}
               <Select
                 label="Estado"
                 value={form.status}
@@ -553,7 +603,12 @@ export default function UsuariosScreen() {
 
               <View style={styles.formActions}>
                 <Button title="Cancelar" variant="ghost" onPress={() => setFormVisible(false)} disabled={saving} />
-                <Button title={editing ? 'Guardar cambios' : 'Crear usuario'} onPress={() => void save()} loading={saving} />
+                <Button
+                  title={editing ? 'Guardar cambios' : 'Crear usuario'}
+                  onPress={() => void save()}
+                  loading={saving}
+                  disabled={rolesLoading || Boolean(rolesError) || (!editing && activeRoleList.length === 0)}
+                />
               </View>
             </Pressable>
           </KeyboardAvoidingView>
@@ -636,8 +691,14 @@ export default function UsuariosScreen() {
                 onChange={(value) => setInviteForm((f) => ({ ...f, roleId: value }))}
                 error={inviteErrors.roleId}
                 placeholder="Selecciona un rol"
-                disabled={inviteSaving || roles.length === 0}
+                disabled={inviteSaving || rolesLoading || Boolean(rolesError) || activeRoleList.length === 0}
               />
+              {rolesError ? <ErrorState message={rolesError} onRetry={reloadRoles} /> : null}
+              {!rolesLoading && !rolesError && activeRoleList.length === 0 ? (
+                <Text style={[styles.cellMuted, { color: c.danger }]}>
+                  No hay roles activos disponibles. Activa un rol en la pantalla de Roles para invitar a un usuario.
+                </Text>
+              ) : null}
 
               <View style={styles.formActions}>
                 <Button
@@ -650,6 +711,7 @@ export default function UsuariosScreen() {
                   title="Enviar invitación"
                   onPress={() => void saveInvite()}
                   loading={inviteSaving}
+                  disabled={rolesLoading || Boolean(rolesError) || activeRoleList.length === 0}
                 />
               </View>
             </Pressable>

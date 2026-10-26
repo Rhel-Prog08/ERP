@@ -18,6 +18,7 @@ const { DEFAULT_ROLES, ROLE_PERMISSIONS } = require('../../config/constants');
 const User = require('../users/model');
 const Role = require('../roles/model');
 const Company = require('../companies/model');
+const { assignOwner } = require('../companies/service');
 const Warehouse = require('../warehouses/model');
 const settingsService = require('../settings/service');
 const Invitation = require('./model');
@@ -25,6 +26,7 @@ const { withTransaction } = require('../../config/db');
 const { ValidationError, ConflictError, NotFoundError, ApiError } = require('../../utils/errors');
 const { generateToken, hashToken } = require('../../utils/tokens');
 const { assertPasswordStrength } = require('../../utils/password');
+const { assertRoleAssignable } = require('../../utils/assertRoleAssignable');
 const { getPagination, getSort, paginated } = require('../../utils/pagination');
 const { sendVerificationMail, sendInvitationMail } = require('../../utils/mailer');
 const { recordAudit, requestMeta } = require('../audit/service');
@@ -55,6 +57,7 @@ async function createInvitation(actor, body, req) {
   // la cuenta queda atada a una empresa autorizada sin opción de elegir.
   const role = await Role.findOne({ _id: body.roleId, companyId: actor.companyId }).lean();
   if (!role) throw new ValidationError('El rol indicado no existe en tu empresa');
+  assertRoleAssignable(actor, role);
 
   const existingUser = await User.findOne({ email }).select('_id').lean();
   if (existingUser) throw new ConflictError('Ese correo ya está registrado');
@@ -196,6 +199,15 @@ async function register({ inviteToken, firstName, lastName, email, password, pas
     ]);
   }
 
+  const roleIsActive = await Role.exists({
+    _id: invitation.roleId,
+    companyId: invitation.companyId,
+    status: 'active',
+  });
+  if (!roleIsActive) {
+    throw new ValidationError('La invitación no es válida o ha caducado');
+  }
+
   const duplicated = await User.findOne({ email: normalizedEmail }).select('_id').lean();
   if (duplicated) throw new ConflictError('Ese correo ya está registrado. Inicie sesión.');
 
@@ -293,6 +305,8 @@ async function register({ inviteToken, firstName, lastName, email, password, pas
  *  - La cuenta nace bloqueada hasta verificar el correo (verificationRequired):
  *    como es la ÚNICA cuenta de la empresa, nadie puede abrir sesión ni ver
  *    datos de esa empresa hasta completar la verificación.
+ *  - El usuario inicial queda registrado como ownerUserId de la empresa en
+ *    la misma transacción; la propiedad no se deduce del rol Administrador.
  */
 async function registerCompany(
   { companyName, firstName, lastName, email, password, passwordConfirm },
@@ -320,6 +334,13 @@ async function registerCompany(
   let result;
   try {
     result = await withTransaction(async (session) => {
+      if (!session) {
+        throw new ApiError(
+          503,
+          'TRANSACTIONS_REQUIRED',
+          'El registro de empresas requiere transacciones de MongoDB'
+        );
+      }
       const opts = session ? { session } : {};
 
       // 1) Empresa mínima: nombre + correo de contacto (el resto lo completa
@@ -375,7 +396,11 @@ async function registerCompany(
         opts
       );
 
-      // 5) Auditoría atómica en la empresa nueva.
+      // 5) La propiedad se asigna al usuario de la misma empresa y con el
+      //    mismo session usado para crear todo el tenant.
+      await assignOwner(company._id, user._id, session);
+
+      // 6) Auditoría atómica en la empresa nueva.
       await recordAudit(
         {
           userId: user._id,

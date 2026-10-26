@@ -20,6 +20,7 @@ function signAccessToken(user) {
       sub: String(user._id),
       companyId: String(user.companyId),
       roleId: String(user.roleId && user.roleId._id ? user.roleId._id : user.roleId),
+      roleVersion: user.roleId.authorizationVersion,
     },
     env.jwt.secret,
     { expiresIn: env.jwt.expiresIn }
@@ -148,6 +149,12 @@ async function login({ email, password }, req) {
   if (!user.roleId || !user.roleId._id) {
     throw new AuthorizationError('El usuario no tiene un rol asignado');
   }
+  if (user.roleId.status !== 'active') {
+    throw new AuthenticationError('El rol asignado está desactivado');
+  }
+  if (String(user.roleId.companyId) !== String(user.companyId._id || user.companyId)) {
+    throw new AuthorizationError('El rol no pertenece a la empresa del usuario');
+  }
 
   // Éxito → reiniciar contadores y emitir tokens.
   user.failedLoginAttempts = 0;
@@ -184,6 +191,14 @@ async function refresh({ refreshToken }, req) {
 
   const invalid = new AuthenticationError('Refresh token inválido o expirado');
   if (!user || user.status !== 'active' || user.isLocked()) throw invalid;
+  if (
+    !user.roleId ||
+    !user.roleId._id ||
+    user.roleId.status !== 'active' ||
+    String(user.roleId.companyId) !== String(user.companyId._id || user.companyId)
+  ) {
+    throw invalid;
+  }
 
   const stored = user.refreshTokens.find((t) => t.tokenHash === tokenHash);
   if (!stored || stored.expiresAt.getTime() < Date.now()) throw invalid;

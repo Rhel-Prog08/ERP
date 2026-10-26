@@ -15,6 +15,7 @@ const companySchema = new Schema(
     phone: { type: String, trim: true, maxlength: 40 },
     email: { type: String, trim: true, lowercase: true, maxlength: 160 },
     address: { type: String, trim: true, maxlength: 240 },
+    ownerUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, enum: STATUSES, default: 'active' },
   },
   { timestamps: true }
@@ -22,5 +23,12 @@ const companySchema = new Schema(
 
 companySchema.index({ name: 1 });
 companySchema.index({ status: 1 });
+companySchema.index(
+  { ownerUserId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { ownerUserId: { $type: 'objectId' } },
+  }
+);
 
 module.exports = model('Company', companySchema);

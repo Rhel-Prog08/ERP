@@ -130,7 +130,15 @@ router.patch(
       if (permissionsChanged && String(rol._id) === req.user.role.id) {
         throw new ConflictError('No puedes modificar los permisos de tu propio rol');
       }
+      if (
+        patch.status === 'inactive' &&
+        rol.status !== 'inactive' &&
+        String(rol._id) === req.user.role.id
+      ) {
+        throw new ConflictError('No puedes desactivar tu propio rol');
+      }
       if (permissionsChanged) await assertPermissionKeys(patch.permissions);
+      const roleStatusChanged = patch.status !== undefined && patch.status !== rol.status;
 
       // Snapshot SÓLO de los campos modificados.
       const previousValue = {};
@@ -143,8 +151,20 @@ router.patch(
         newValue[field] = field === 'permissions' ? [...value] : value;
       }
 
+      if (roleStatusChanged) {
+        rol.authorizationVersion = (rol.authorizationVersion || 0) + 1;
+      }
+
       if (Object.keys(newValue).length > 0) {
         await rol.save(session ? { session } : {});
+        if (roleStatusChanged && patch.status === 'inactive') {
+          const revokeOptions = session ? { session } : {};
+          await User.updateMany(
+            { roleId: rol._id },
+            { $set: { refreshTokens: [] } },
+            revokeOptions
+          );
+        }
         await recordAudit(
           {
             userId: req.user.id,

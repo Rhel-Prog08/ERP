@@ -16,6 +16,7 @@ const { getPagination, getSort, paginated } = require('../../utils/pagination');
 const { escapeRegex } = require('../../utils/regex');
 const { assertPasswordStrength } = require('../../utils/password');
 const { assertPermission } = require('../../utils/assertPermission');
+const { assertRoleAssignable } = require('../../utils/assertRoleAssignable');
 const { recordAudit, auditFromReq, requestMeta } = require('../audit/service');
 
 /** Campos ordenables del listado. */
@@ -78,6 +79,7 @@ async function create(actor, body, req) {
   // El rol debe existir en la empresa DESTINO.
   const role = await Role.findOne({ _id: body.roleId, companyId: destCompanyId }).lean();
   if (!role) throw new ValidationError('El rol no existe en la empresa destino');
+  assertRoleAssignable(actor, role);
 
   // Email único global (el índice único también devolvería 409).
   const duplicated = await User.exists({ email: body.email });
@@ -144,6 +146,7 @@ async function update(actor, id, patch, req) {
     if (patch.roleId !== undefined) {
       const role = await Role.findOne({ _id: patch.roleId, companyId: target.companyId }).lean();
       if (!role) throw new ValidationError('El rol no existe en la empresa del usuario');
+      assertRoleAssignable(actor, role);
     }
 
     const passwordChanged = patch.newPassword !== undefined;

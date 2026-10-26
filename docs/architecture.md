@@ -100,6 +100,10 @@ Cancelaciones: mismo patrón con movimiento **inverso** (`RETURN` para ventas,
   devuelve **404** (no 403) para no filtrar la existencia de datos ajenos.
 - `POST /companies` aprovisiona la nueva empresa de forma atómica (6 roles,
   almacén principal, settings); el alta se audita en la empresa del ACTOR.
+- El registro público de empresa fija `companies.ownerUserId` al primer usuario
+  dentro de la transacción de aprovisionamiento. La referencia es opcional para
+  conservar compatibilidad; `POST /companies` autenticado todavía crea empresas
+  sin propietario y necesita una etapa posterior de designación explícita.
 - Excepción documentada: `POST /users` admite alta cross-company únicamente
   con `companies.create`, para que un administrador pueda dar de alta usuarios
   en empresas hermanas del mismo grupo.

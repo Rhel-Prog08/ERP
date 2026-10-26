@@ -37,6 +37,18 @@ async function authenticate(req, res, next) {
     if (!user.roleId || !user.roleId._id) {
       throw new AuthorizationError('El usuario no tiene un rol asignado');
     }
+    if (
+      !Number.isSafeInteger(payload.roleVersion) ||
+      payload.roleVersion !== user.roleId.authorizationVersion
+    ) {
+      throw new AuthenticationError('El token de acceso fue revocado; inicia sesión nuevamente');
+    }
+    if (user.roleId.status !== 'active') {
+      throw new AuthenticationError('El rol asignado está desactivado');
+    }
+    if (String(user.roleId.companyId) !== String(user.companyId)) {
+      throw new AuthorizationError('El rol no pertenece a la empresa del usuario');
+    }
 
     req.user = {
       id: String(user._id),
