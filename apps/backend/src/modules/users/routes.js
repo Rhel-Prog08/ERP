@@ -12,6 +12,7 @@ const { sendSuccess, sendCreated } = require('../../utils/response');
 const { validate, validateQuery } = require('../../utils/validate');
 const { authenticate } = require('../../middlewares/authenticate');
 const { authorize } = require('../../middlewares/authorize');
+const { invitationResendLimiter } = require('../../middlewares/rateLimit');
 const service = require('./service');
 const registration = require('../registration/service');
 const { userListSchema, userCreateSchema, userUpdateSchema } = require('./validation');
