@@ -16,6 +16,8 @@ const { getPagination, getSort, paginated } = require('../../utils/pagination');
 const { escapeRegex } = require('../../utils/regex');
 const { assertPasswordStrength } = require('../../utils/password');
 const { assertPermission } = require('../../utils/assertPermission');
+const { assertRoleAssignable } = require('../../utils/assertRoleAssignable');
+const { isOwnerOfCompany } = require('../../utils/ownership');
 const { recordAudit, auditFromReq, requestMeta } = require('../audit/service');
 
 /** Campos ordenables del listado. */
@@ -78,6 +80,7 @@ async function create(actor, body, req) {
   // El rol debe existir en la empresa DESTINO.
   const role = await Role.findOne({ _id: body.roleId, companyId: destCompanyId }).lean();
   if (!role) throw new ValidationError('El rol no existe en la empresa destino');
+  assertRoleAssignable(actor, role);
 
   // Email único global (el índice único también devolvería 409).
   const duplicated = await User.exists({ email: body.email });
@@ -120,7 +123,9 @@ async function create(actor, body, req) {
  * PATCH /users/:id — edición con guards:
  *  - nadie se cambia su propio estado ni su propio rol;
  *  - email único; rol válido en la empresa del TARGET;
- *  - newPassword → fuerza + cierra sesiones del target (refreshTokens=[]).
+ *  - newPassword → fuerza + cierra sesiones del target (refreshTokens=[]);
+ *  - PROPIETARIO: un administrador ajeno no puede alterar el estado, rol,
+ *    contraseña ni correo del propietario de la empresa.
  */
 async function update(actor, id, patch, req) {
   return withTransaction(async (session) => {
@@ -136,6 +141,24 @@ async function update(actor, id, patch, req) {
       throw new ConflictError('No puedes cambiar tu propio estado ni tu propio rol');
     }
 
+    // PROTECCIÓN PROPIETARIO: si el objetivo es el propietario de la empresa,
+    // un administrador ajeno no puede alterar su autoridad (rol/privilegios),
+    // su estado, su contraseña ni su correo electrónico. El propietario
+    // conserva el control de su propia cuenta (el reset de su password por
+    // self sigue permitido). Empresas legacy sin owner no se bloquean
+    // (isOwnerOfCompany → false).
+    const companyDoc = await Company.findOne({ _id: target.companyId }).select('ownerUserId').lean();
+    const ownerId = companyDoc && companyDoc.ownerUserId ? String(companyDoc.ownerUserId) : null;
+    const isOwner = isOwnerOfCompany(target._id, ownerId);
+    const touchesOwnerSecurity =
+      patch.status !== undefined ||
+      patch.roleId !== undefined ||
+      patch.newPassword !== undefined ||
+      patch.email !== undefined;
+    if (isOwner && !isSelf && touchesOwnerSecurity) {
+      throw new ConflictError('No se puede modificar o desactivar al propietario de la empresa');
+    }
+
     if (patch.email !== undefined && patch.email !== target.email) {
       const duplicated = await User.exists({ email: patch.email, _id: { $ne: target._id } });
       if (duplicated) throw new ConflictError('Ese email ya está registrado');
@@ -144,6 +167,7 @@ async function update(actor, id, patch, req) {
     if (patch.roleId !== undefined) {
       const role = await Role.findOne({ _id: patch.roleId, companyId: target.companyId }).lean();
       if (!role) throw new ValidationError('El rol no existe en la empresa del usuario');
+      assertRoleAssignable(actor, role);
     }
 
     const passwordChanged = patch.newPassword !== undefined;
@@ -217,6 +241,16 @@ async function deactivate(actor, id, req) {
   if (!target) throw new NotFoundError('Usuario no encontrado');
   if (String(target._id) === actor.id) throw new ConflictError('No puedes desactivarte a ti mismo');
   if (target.status !== 'active') return target; // ya inactivo → idempotente
+
+  // PROTECCIÓN PROPIETARIO: nadie (ni otro administrador de la misma empresa)
+  // puede desactivar al propietario de la empresa. El owner concentra la
+  // autoridad exclusiva y la baja lógica debe gestionarse con transferencia
+  // explícita (pendiente). Las empresas legacy sin owner no se tocan aquí.
+  const companyDoc = await Company.findOne({ _id: target.companyId }).select('ownerUserId').lean();
+  const ownerId = companyDoc && companyDoc.ownerUserId ? String(companyDoc.ownerUserId) : null;
+  if (isOwnerOfCompany(target._id, ownerId)) {
+    throw new ConflictError('No se puede desactivar al propietario de la empresa');
+  }
 
   target.status = 'inactive';
   target.refreshTokens = [];

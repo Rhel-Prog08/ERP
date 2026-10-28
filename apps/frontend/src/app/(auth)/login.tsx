@@ -7,10 +7,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { toApiError } from '../../services/apiClient';
+import { authService } from '../../services/authService';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 
@@ -19,14 +21,19 @@ export default function LoginScreen() {
   const theme = useTheme();
   const c = theme.colors;
   const { login, pending } = useAuth();
+  const router = useRouter();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  // Reenvío de verificación cuando el backend deniega el acceso por correo
+  // sin verificar (message contiene "pendiente de verificar").
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
 
   const submit = async () => {
     setFormError(null);
+    setResendState('idle');
     setFieldErrors({});
     if (!email.trim() || !password) {
       setFieldErrors({
@@ -47,6 +54,26 @@ export default function LoginScreen() {
       });
     }
   };
+
+  const resend = async () => {
+    if (!email.trim()) {
+      setFieldErrors({ email: 'Introduce tu correo electrónico' });
+      return;
+    }
+    setResendState('sending');
+    try {
+      await authService.resendVerification(email.trim());
+      // Respuesta genérica del servidor: se informa sin afirmar más de lo que
+      // el backend garantiza.
+      setResendState('sent');
+    } catch {
+      setResendState('idle');
+      setFormError('No se pudo solicitar el reenvío. Inténtalo de nuevo en unos minutos.');
+    }
+  };
+
+  const needsVerification =
+    formError !== null && formError.toLowerCase().includes('pendiente de verificar');
 
   return (
     <View style={[styles.root, { backgroundColor: '#0f172a' }]}>
@@ -113,6 +140,49 @@ export default function LoginScreen() {
                 disabled={pending}
               />
 
+              <Button
+                title="¿Olvidaste tu contraseña?"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onPress={() => router.push('/solicitar-recuperar')}
+              />
+
+              {/* Cuenta sin verificar: opción de reenviar el correo (limitado
+                  en el servidor:5 envíos / 15 min + enfriamiento por cuenta). */}
+              {needsVerification ? (
+                <View style={[styles.verifyBox, { backgroundColor: c.warningBg }]}>
+                  <Text style={{ color: c.warning, fontSize: 13, lineHeight: 18 }}>
+                    {resendState === 'sent'
+                      ? 'Si la cuenta existe y sigue pendiente, recibirás el correo en unos minutos. Revisa también la carpeta de spam.'
+                      : '¿No encuentras el correo de verificación? Puedes solicitar el reenvío.'}
+                  </Text>
+                  <Button
+                    title={
+                      resendState === 'sent'
+                        ? 'Reenvío solicitado'
+                        : resendState === 'sending'
+                          ? 'Enviando…'
+                          : 'Reenviar correo de verificación'
+                    }
+                    variant="secondary"
+                    size="sm"
+                    disabled={resendState !== 'idle' || pending}
+                    onPress={() => void resend()}
+                  />
+                </View>
+              ) : null}
+
+              {/* Registro público MULTIEMPRESA: crea empresa propia y su
+                  administrador, sin invitación previa. */}
+              <Button
+                title="Crear cuenta"
+                variant="secondary"
+                disabled={pending}
+                onPress={() => router.push('/crear-cuenta')}
+              />
+
+
               <Text style={[styles.footer, { color: c.textLight }]}>
                 Acceso gestionado por tu empresa. Los permisos de cada módulo los define tu rol.
               </Text>
@@ -146,5 +216,6 @@ const styles = StyleSheet.create({
   brand: { fontSize: 20, fontWeight: '800' },
   brandSub: { fontSize: 13 },
   errorBox: { borderRadius: 10, padding: 12 },
+  verifyBox: { borderRadius: 10, padding: 12, gap: 10 },
   footer: { fontSize: 12, textAlign: 'center', lineHeight: 17 },
 });

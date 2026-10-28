@@ -60,6 +60,17 @@ class InternalServerError extends ApiError {
   }
 }
 
+/**
+ * Fallo u omisión del proveedor de correo (no configurado o error remoto).
+ * 502: el servicio externo no pudo completar la operación; nunca expone
+ * tokens, credenciales ni cuerpos de respuesta del proveedor.
+ */
+class MailError extends ApiError {
+  constructor(message = 'Servicio de correo no disponible') {
+    super(502, 'MAIL_ERROR', message);
+  }
+}
+
 module.exports = {
   ApiError,
   ValidationError,
@@ -69,4 +80,5 @@ module.exports = {
   ConflictError,
   DatabaseError,
   InternalServerError,
+  MailError,
 };

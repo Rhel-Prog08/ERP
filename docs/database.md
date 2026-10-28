@@ -21,7 +21,7 @@ cualquier `update*/delete*` y no existe endpoint de escritura.
 
 | Colección | Claves principales | Índices |
 |---|---|---|
-| `companies` | name, legalName, taxId, phone, email, address, status | `{name}`, `{status}` |
+| `companies` | name, legalName, taxId, phone, email, address, optional `ownerUserId` → users, status | `{name}`, `{status}`, `ownerUserId` unique partial (`$type: objectId`) |
 | `branches` | name, address, phone, status, **companyId** | `{companyId,name}` unique |
 | `warehouses` | name, branchId (null = matriz), status, **companyId** | `{companyId,name}` unique, `{companyId,branchId}` |
 | `settings` | **companyId único** (singleton), taxRate (0–1, def. 0.21), allowNegativeStock (def. false) | `companyId` unique |
@@ -71,6 +71,45 @@ cualquier `update*/delete*` y no existe endpoint de escritura.
   `permissions`, catálogo global, y `companies`, que es la raíz).
 - Los servicios filtran siempre por `req.user.companyId` (derivado del JWT).
 - Un ObjectId de otra empresa → `404 NOT_FOUND` (no se revela existencia).
+- `companies.ownerUserId` es opcional para compatibilidad: ausente significa
+  que la empresa aún no tiene propietario registrado; no se infiere desde el
+  rol Administrador. El registro público asigna atómicamente al usuario inicial.
+- `POST /companies` autenticado todavía no designa propietario; la asignación
+  inicial para ese flujo queda pendiente de una etapa posterior. Los datos y
+  permisos RBAC de empresas sin `ownerUserId` siguen funcionando sin cambios.
+- El índice único parcial de `ownerUserId` excluye tanto campos ausentes como
+  `null`, pero impide que un usuario (ObjectId) sea propietario de más de una
+  empresa. Para instalaciones existentes véase la migración documentada abajo;
+  Mongoose no reemplaza automáticamente el índice sparse anterior.
+
+### Migración del índice ownerUserId
+
+La definición del índice cambia de unique+sparse a unique con
+`partialFilterExpression: { ownerUserId: { $type: 'objectId' } }`. No se debe
+suponer que `autoIndex` modificará un índice con la misma clave y opciones
+distintas. Antes de una migración operativa:
+
+1. Hacer backup y detener temporalmente escrituras a `companies`.
+2. Inspeccionar `db.companies.getIndexes()` y confirmar el nombre exacto del
+   índice anterior (normalmente `ownerUserId_1`).
+3. Buscar valores ObjectId duplicados y abortar para resolución explícita:
+
+   ```javascript
+   db.companies.aggregate([
+     { $match: { ownerUserId: { $type: 'objectId' } } },
+     { $group: { _id: '$ownerUserId', companies: { $push: '$_id' }, count: { $sum: 1 } } },
+     { $match: { count: { $gt: 1 } } }
+   ])
+   ```
+
+4. Con escrituras pausadas, eliminar por nombre el índice sparse antiguo y
+   crear el índice único parcial con la definición de Mongoose. Verificar
+   `getIndexes()` antes de reanudar escrituras.
+5. No asignar propietarios ni normalizar empresas históricas automáticamente.
+   El índice parcial permite documentos con `ownerUserId` ausente o `null`.
+
+Este procedimiento es documentación únicamente; no se ejecuta desde el
+arranque de la aplicación ni como parte de las pruebas.
 
 ## 3. Transacciones
 

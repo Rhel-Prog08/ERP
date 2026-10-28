@@ -15,6 +15,7 @@ const roleSchema = new Schema(
     permissions: { type: [String], default: [] },
     isSystem: { type: Boolean, default: false },
     status: { type: String, enum: STATUSES, default: 'active' },
+    authorizationVersion: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

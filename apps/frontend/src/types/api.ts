@@ -55,6 +55,8 @@ export interface SessionUser {
   lastName: string;
   email: string;
   status: string;
+  /** false sólo en cuentas de registro público aún sin verificar. */
+  emailVerified?: boolean;
   company: SessionUserCompany;
   role: SessionUserRole | null;
 }

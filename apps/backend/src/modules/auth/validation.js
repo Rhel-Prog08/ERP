@@ -24,9 +24,22 @@ const changePasswordSchema = {
   newPassword: { required: true, type: 'string', minLength: 8, maxLength: 128 },
 };
 
+/** POST /auth/forgot-password — respuesta genérica (sin enumerar). */
+const forgotPasswordSchema = {
+  email: { required: true, type: 'email' },
+};
+
+/** POST /auth/reset-password — token de un solo uso + nueva contraseña. */
+const resetPasswordSchema = {
+  token: { required: true, type: 'string', minLength: 16, maxLength: 256 },
+  newPassword: { required: true, type: 'string', minLength: 8, maxLength: 128 },
+};
+
 module.exports = {
   validateLogin: validate(loginSchema),
   validateRefresh: validate(refreshSchema),
   validateLogout: validate(logoutSchema),
   validateChangePassword: validate(changePasswordSchema),
+  validateForgotPassword: validate(forgotPasswordSchema),
+  validateResetPassword: validate(resetPasswordSchema),
 };

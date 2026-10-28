@@ -7,7 +7,10 @@
  */
 function escapeCell(value) {
   if (value === null || value === undefined) return '';
-  const str = value instanceof Date ? value.toISOString() : String(value);
+  let str = value instanceof Date ? value.toISOString() : String(value);
+  if (typeof value === 'string' && /^[\t\r\n ]*[=+\-@]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }

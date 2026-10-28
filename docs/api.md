@@ -122,7 +122,7 @@ o en uso no se borran (409).
 | Método | Ruta | Permiso | Notas |
 |---|---|---|---|
 | GET | `/companies` | `companies.read` | Devuelve **siempre la propia** |
-| POST | `/companies` | `companies.create` | Aprovisiona almacén + settings + 6 roles (transaccional) |
+| POST | `/companies` | `companies.create` | Aprovisiona almacén + settings + 6 roles (transaccional); todavía no designa propietario |
 | PATCH | `/companies/:id` | `companies.update` | Sólo la propia; otra → 404 |
 | CRUD | `/branches`, `/warehouses` | `<m>.read/create/update/delete` | CRUD estándar |
 | GET | `/settings` | `settings.read` | Singleton por empresa (find-or-create) |

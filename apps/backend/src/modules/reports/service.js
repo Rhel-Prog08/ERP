@@ -21,12 +21,14 @@ const round2 = (n) => Math.round(n * 100) / 100;
 function dateRange(query) {
   const range = {};
   if (query.dateFrom) {
-    const d = new Date(query.dateFrom);
+    const value = new Date(query.dateFrom);
+    const d = new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
     d.setHours(0, 0, 0, 0);
     range.$gte = d;
   }
   if (query.dateTo) {
-    const d = new Date(query.dateTo);
+    const value = new Date(query.dateTo);
+    const d = new Date(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
     d.setHours(23, 59, 59, 999);
     range.$lte = d;
   }

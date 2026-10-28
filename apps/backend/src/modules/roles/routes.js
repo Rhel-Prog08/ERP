@@ -19,6 +19,8 @@ const { recordAudit, auditFromReq, requestMeta } = require('../audit/service');
 const Role = require('./model');
 const Permission = require('../permissions/model');
 const User = require('../users/model');
+const Company = require('../companies/model');
+const { isOwnerOfCompany } = require('../../utils/ownership');
 const { roleCreateSchema, roleUpdateSchema } = require('./validation');
 
 /** Campos editables y auditables de un rol. */
@@ -130,7 +132,41 @@ router.patch(
       if (permissionsChanged && String(rol._id) === req.user.role.id) {
         throw new ConflictError('No puedes modificar los permisos de tu propio rol');
       }
+      if (
+        patch.status === 'inactive' &&
+        rol.status !== 'inactive' &&
+        String(rol._id) === req.user.role.id
+      ) {
+        throw new ConflictError('No puedes desactivar tu propio rol');
+      }
+
+      // PROTECCIÓN PROPIETARIO: si el rol es usado por el propietario de la
+      // empresa, un administrador ajeno no puede alterar sus permisos ni
+      // desactivarlo (dejaría al owner sin acceso esencial). El owner puede
+      // modificar su propio rol (guard del self ya aplicado arriba). Las
+      // empresas legacy sin owner no se bloquean (ownerId ausente → sin
+      // restricción adicional).
+      const ownerDoc = await Company.findOne({ _id: req.user.companyId }).select('ownerUserId').lean();
+      const ownerId = ownerDoc && ownerDoc.ownerUserId ? String(ownerDoc.ownerUserId) : null;
+      if (!isOwnerOfCompany(req.user.id, ownerId) && ownerId) {
+        const ownerUser = await User.findOne({ _id: ownerId, companyId: req.user.companyId }).select(
+          'roleId status'
+        );
+        if (ownerUser && String(ownerUser.roleId) === String(rol._id) && ownerUser.status === 'active') {
+          if (permissionsChanged) {
+            throw new ConflictError(
+              'No se pueden modificar los permisos del rol del propietario de la empresa'
+            );
+          }
+          if (patch.status === 'inactive' && rol.status !== 'inactive') {
+            throw new ConflictError(
+              'No se puede desactivar el rol del propietario de la empresa'
+            );
+          }
+        }
+      }
       if (permissionsChanged) await assertPermissionKeys(patch.permissions);
+      const roleStatusChanged = patch.status !== undefined && patch.status !== rol.status;
 
       // Snapshot SÓLO de los campos modificados.
       const previousValue = {};
@@ -143,8 +179,20 @@ router.patch(
         newValue[field] = field === 'permissions' ? [...value] : value;
       }
 
+      if (roleStatusChanged) {
+        rol.authorizationVersion = (rol.authorizationVersion || 0) + 1;
+      }
+
       if (Object.keys(newValue).length > 0) {
         await rol.save(session ? { session } : {});
+        if (roleStatusChanged && patch.status === 'inactive') {
+          const revokeOptions = session ? { session } : {};
+          await User.updateMany(
+            { roleId: rol._id },
+            { $set: { refreshTokens: [] } },
+            revokeOptions
+          );
+        }
         await recordAudit(
           {
             userId: req.user.id,
