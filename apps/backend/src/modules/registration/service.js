@@ -23,7 +23,7 @@ const Warehouse = require('../warehouses/model');
 const settingsService = require('../settings/service');
 const Invitation = require('./model');
 const { withTransaction } = require('../../config/db');
-const { ValidationError, ConflictError, NotFoundError, ApiError } = require('../../utils/errors');
+const { ValidationError, ConflictError, NotFoundError, ApiError, MailError } = require('../../utils/errors');
 const { generateToken, hashToken } = require('../../utils/tokens');
 const { assertPasswordStrength } = require('../../utils/password');
 const { assertRoleAssignable } = require('../../utils/assertRoleAssignable');
@@ -99,12 +99,11 @@ async function createInvitation(actor, body, req) {
       inviterName: `${actor.firstName} ${actor.lastName}`.trim(),
     });
   } catch (err) {
-    // El correo falló: se revoca la invitación recién creada para no dejar
-    // un registro "pending" inutilizable que bloquearía crear otra; el
-    // administrador ve el error real (502) sin fingir envío y puede reintentar.
-    invitation.status = 'revoked';
-    await invitation.save();
-    throw err;
+    // El proveedor de correo falló: NO se revoca la invitación. Queda
+    // pendiente con su token creado; el administrador puede usar "Reenviar"
+    // para intentarlo nuevamente tras el cooldown. No se afirma entrega sin
+    // confirmación del proveedor.
+    throw new MailError('No se pudo enviar el correo de invitación; inténtelo nuevamente.');
   }
 
   await recordAudit({
@@ -162,6 +161,103 @@ async function revokeInvitation(actor, id, req) {
   });
 
   return invitation;
+}
+
+/** POST /users/invitations/resend — reenvío seguro de invitaciones. */
+async function resendInvitation(actor, body, req) {
+  const email = String(body.email || '').trim().toLowerCase();
+
+  // El reenvío siempre se resuelve dentro de la empresa del actor: un admin
+  // de una empresa NO puede reenvíar invitaciones de otra (aislamiento).
+  const pending = await Invitation.findOne({
+    email,
+    companyId: actor.companyId,
+    status: 'pending',
+  }).sort({ createdAt: -1 });
+
+  // Caso A: invitación pendiente (o caducada) → rotación segura del token.
+  // Nuevo hash SHA-256 + nueva caducidad: el token anterior queda invalidado
+  // al ser reemplazado. Cooldown por invitación para no spamear al mismo
+  // correo (excluye invitaciones ya vencidas: se reenvían sin espera).
+  if (pending) {
+    const expired = pending.expiresAt && new Date(pending.expiresAt).getTime() < Date.now();
+    if (!expired) {
+      const cooldownMs = (env.registration.invitationResendCooldownSeconds || 60) * 1000;
+      const lastActivityAt = pending.updatedAt ? new Date(pending.updatedAt).getTime() : Date.now();
+      if (Date.now() - lastActivityAt < cooldownMs) {
+        throw new ConflictError('Debo esperar antes de reenviar esta invitación');
+      }
+    }
+
+    const token = generateToken();
+    const newExpiresAt = new Date(
+      Date.now() + env.registration.invitationTtlDays * 24 * 60 * 60 * 1000
+    );
+
+    // Rotación atómica con control de concurrencia optimista (__v). Si otra
+    // operación ya modificó la invitación, el filtro __v no coincide y se
+    // devuelve null → ConflictError para reintentar.
+    const updated = await Invitation.findOneAndUpdate(
+      { _id: pending._id, status: 'pending', __v: pending.__v },
+      {
+        $set: { tokenHash: hashToken(token), expiresAt: newExpiresAt },
+        $inc: { __v: 1 },
+        $currentDate: { updatedAt: true },
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      throw new ConflictError('La invitación fue modificada por otra operación; reintente.');
+    }
+
+    try {
+      await sendInvitationMail({
+        to: email,
+        firstName: pending.firstName,
+        token,
+        inviterName: `${actor.firstName} ${actor.lastName}`.trim(),
+      });
+    } catch (err) {
+      // El proveedor de correo falló: NO se revoca la invitación. Queda
+      // pendiente en BD con el token rotado (el enlace anterior queda
+      // invalidado) y el administrador puede reintentar el reenvío tras el
+      // cooldown. No se afirma entrega sin confirmación del proveedor.
+      throw new MailError('No se pudo enviar el correo de invitación; inténtelo nuevamente.');
+    }
+
+    await recordAudit({
+      userId: actor.id || actor._id,
+      companyId: actor.companyId,
+      action: 'RESEND_INVITATION',
+      module: 'users',
+      entity: 'invitation',
+      entityId: String(updated._id),
+      previousValue: { status: 'pending' },
+      newValue: { status: 'pending', expiresAt: updated.expiresAt },
+      description: `Reenvío de invitación para ${email}`,
+      ...requestMeta(req),
+    });
+
+    return updated;
+  }
+
+  // Caso B: invitación utilizada o revocada → NO se reenvía; exige una NUEVA
+  // invitación creada por un autorizado (rol válido asignado por el invitador).
+  if (body.roleId) {
+    if (!body.firstName || !body.lastName) {
+      throw new ValidationError('Para crear una invitación se requieren nombre y apellidos');
+    }
+    return createInvitation(actor, {
+      email,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      roleId: body.roleId,
+    }, req);
+  }
+
+  // Caso C: sin invitación pendiente y sin datos para crear una nueva.
+  throw new NotFoundError('No hay invitaciones pendientes para ese correo');
 }
 
 /* ------------------------------------------------------------------ *
@@ -574,6 +670,7 @@ module.exports = {
   createInvitation,
   listInvitations,
   revokeInvitation,
+  resendInvitation,
   register,
   registerCompany,
   verifyEmail,

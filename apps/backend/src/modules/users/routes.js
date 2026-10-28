@@ -18,6 +18,7 @@ const { userListSchema, userCreateSchema, userUpdateSchema } = require('./valida
 const {
   invitationListSchema,
   validateInvitationCreate,
+  validateInvitationResend,
 } = require('../registration/validation');
 
 /* --------------------------------------------------------------- *
@@ -44,6 +45,20 @@ router.post(
   validateInvitationCreate,
   asyncHandler(async (req, res) => {
     sendCreated(res, await registration.createInvitation(req.user, req.body, req));
+  })
+);
+
+// POST /api/v1/users/invitations/resend — reenvío seguro: rota token de la
+// invitación pendiente (o crea una nueva con rol autorizado si ya fue usada o
+// revocada). Throttle + permiso users.create (mismas garantías que crear).
+router.post(
+  '/invitations/resend',
+  authenticate,
+  authorize('users.create'),
+  invitationResendLimiter,
+  validateInvitationResend,
+  asyncHandler(async (req, res) => {
+    sendSuccess(res, await registration.resendInvitation(req.user, req.body, req));
   })
 );
 

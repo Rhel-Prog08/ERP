@@ -102,6 +102,8 @@ module.exports = {
     invitationTtlDays: parseIntEnv(process.env.INVITATION_TTL_DAYS, 7),
     /** Enfriamiento mínimo entre reenvíos de verificación por cuenta (segundos). */
     resendCooldownSeconds: parseIntEnv(process.env.VERIFICATION_RESEND_COOLDOWN_SECONDS, 120),
+    /** Enfriamiento mínimo entre reenvíos de invitación por invitación (segundos). */
+    invitationResendCooldownSeconds: parseIntEnv(process.env.INVITATION_RESEND_COOLDOWN_SECONDS, 60),
   },
   jwt: {
     secret: process.env.JWT_SECRET,

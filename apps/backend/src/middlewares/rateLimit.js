@@ -79,4 +79,23 @@ const resendLimiter = rateLimit({
   message: RATE_MESSAGE,
 });
 
-module.exports = { globalLimiter, authLimiter, registerLimiter, verifyLimiter, resendLimiter };
+/**
+ * Reenvío de invitaciones: mismo perfil que el de verificación (throttle por
+ * IP + enfriamiento por invitación aplicado en el servicio).
+ */
+const invitationResendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: testMax('TEST_RATE_LIMIT_INVITATION_RESEND_MAX', env.isTest ? 100000 : env.isProd ? 5 : 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_MESSAGE,
+});
+
+module.exports = {
+  globalLimiter,
+  authLimiter,
+  registerLimiter,
+  verifyLimiter,
+  resendLimiter,
+  invitationResendLimiter,
+};

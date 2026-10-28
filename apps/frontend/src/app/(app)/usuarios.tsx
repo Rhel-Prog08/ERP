@@ -132,6 +132,7 @@ export default function UsuariosScreen() {
   });
   const [toRevoke, setToRevoke] = useState<Invitation | null>(null);
   const [revoking, setRevoking] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const loadInvites = useCallback(() => {
     setInvitesLoading(true);
@@ -211,6 +212,20 @@ export default function UsuariosScreen() {
       toast.error(toApiError(err).message);
     } finally {
       setRevoking(false);
+    }
+  };
+
+  /** Reenvío seguro: backend rota el token de la invitación pendiente (o crea nueva). */
+  const resendInvite = async (inv: Invitation) => {
+    setResendingId(inv._id);
+    try {
+      await usersService.resendInvitation({ email: inv.email });
+      toast.success('Invitación reenviada');
+      loadInvites();
+    } catch (err) {
+      toast.error(toApiError(err).message);
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -497,6 +512,15 @@ export default function UsuariosScreen() {
                       variant="ghost"
                       size="sm"
                       onPress={() => setToRevoke(inv)}
+                    />
+                  ) : null}
+                  {can('users.create') ? (
+                    <Button
+                      title={resendingId === inv._id ? 'Reenviando…' : 'Reenviar'}
+                      variant="ghost"
+                      size="sm"
+                      disabled={resendingId === inv._id}
+                      onPress={() => void resendInvite(inv)}
                     />
                   ) : null}
                 </View>

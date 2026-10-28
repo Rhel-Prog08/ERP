@@ -54,10 +54,19 @@ const resendVerificationSchema = {
   email: { required: true, type: 'email' },
 };
 
+/** POST /users/invitations/resend — email opcional + rol para crear nueva. */
+const invitationResendSchema = {
+  email: { required: true, type: 'email' },
+  firstName: { type: 'string', minLength: 1, maxLength: 60 },
+  lastName: { type: 'string', minLength: 1, maxLength: 60 },
+  roleId: { type: 'objectId' },
+};
+
 module.exports = {
   invitationListSchema,
   validateInvitationCreate: validate(invitationCreateSchema),
   validateInvitationList: validate(invitationListSchema),
+  validateInvitationResend: validate(invitationResendSchema),
   validateRegister: validate(registerSchema),
   validatePublicRegister: validate(registerCompanySchema),
   validateVerifyEmail: validate(verifyEmailSchema),

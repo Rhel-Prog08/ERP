@@ -40,6 +40,16 @@ export const usersService = {
     return request<Paginated<Invitation>>('/users/invitations', { query: params });
   },
 
+  /** Reenvía invitación pendiente (rota token) o crea nueva si ya fue usada/revocada. */
+  resendInvitation(input: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    roleId?: string;
+  }): Promise<Invitation> {
+    return request<Invitation>('/users/invitations/resend', { method: 'POST', body: input });
+  },
+
   revokeInvitation(id: string): Promise<Invitation> {
     return request<Invitation>(`/users/invitations/${id}`, { method: 'DELETE' });
   },
