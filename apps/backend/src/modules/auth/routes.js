@@ -7,9 +7,11 @@ const {
   registerLimiter,
   verifyLimiter,
   resendLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
 } = require('../../middlewares/rateLimit');
 const controller = require('./controller');
-const { validateLogin, validateRefresh, validateLogout, validateChangePassword } = require('./validation');
+const { validateLogin, validateRefresh, validateLogout, validateChangePassword, validateForgotPassword, validateResetPassword } = require('./validation');
 const {
   validateRegister,
   validatePublicRegister,
@@ -73,6 +75,12 @@ router.post('/logout', validateLogout, controller.logout);
 
 // POST /api/v1/auth/change-password — requiere sesión activa.
 router.post('/change-password', authenticate, validateChangePassword, controller.changePassword);
+
+// POST /api/v1/auth/forgot-password — solicitud de restablecimiento (respuesta genérica).
+router.post('/forgot-password', forgotPasswordLimiter, validateForgotPassword, controller.forgotPassword);
+
+// POST /api/v1/auth/reset-password — restablecimiento con token de un solo uso.
+router.post('/reset-password', resetPasswordLimiter, validateResetPassword, controller.resetPassword);
 
 // GET /api/v1/auth/me — perfil + permisos del usuario autenticado.
 router.get('/me', authenticate, controller.me);

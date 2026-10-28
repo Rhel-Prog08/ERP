@@ -91,6 +91,30 @@ const invitationResendLimiter = rateLimit({
   message: RATE_MESSAGE,
 });
 
+/**
+ * Solicitud de restablecimiento de contraseña: throttle por IP para impedir
+ * spam de correos de restablecimiento (5 / 15 min / IP en producción).
+ */
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: testMax('TEST_RATE_LIMIT_FORGOT_PASSWORD_MAX', env.isTest ? 100000 : env.isProd ? 5 : 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_MESSAGE,
+});
+
+/**
+ * Restablecimiento de contraseña: throttle por IP para impedir fuerza bruta
+ * sobre tokens opacos (5 / 15 min / IP en producción).
+ */
+const resetPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: testMax('TEST_RATE_LIMIT_RESET_PASSWORD_MAX', env.isTest ? 100000 : env.isProd ? 5 : 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_MESSAGE,
+});
+
 module.exports = {
   globalLimiter,
   authLimiter,
@@ -98,4 +122,6 @@ module.exports = {
   verifyLimiter,
   resendLimiter,
   invitationResendLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
 };

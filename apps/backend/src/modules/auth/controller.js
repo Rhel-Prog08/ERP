@@ -28,6 +28,16 @@ module.exports = {
     sendSuccess(res, data);
   }),
 
+  forgotPassword: asyncHandler(async (req, res) => {
+    const data = await service.forgotPassword(req.body, req);
+    sendSuccess(res, data);
+  }),
+
+  resetPassword: asyncHandler(async (req, res) => {
+    const data = await service.resetPassword(req.body, req);
+    sendSuccess(res, data);
+  }),
+
   me: asyncHandler(async (req, res) => {
     const data = await service.getMe(req.user);
     sendSuccess(res, data);

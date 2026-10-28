@@ -35,7 +35,31 @@ const userSchema = new Schema(
     },
     lastLoginAt: { type: Date },
     /**
-     * Verificación de correo (FASE 4). Compatibilidad con migración:
+     * Versión de contraseña. Se incrementa en cada cambio/restablecimiento
+     * de contraseña para invalidar los JWT de acceso ya emitidos (son
+     * estatales y no se pueden revocar individualmente). El middleware de
+     * autenticación compara payload.passwordVersion con este valor.
+     */
+    passwordVersion: { type: Number, default: 0, min: 0 },
+    /**
+     * Token de restablecimiento de contraseña (FASE C). Sólo su hash SHA-256
+     * se guarda en BD; el valor en claro viaja únicamente por correo.
+     * `usedAt` marca su consumo (un solo uso).
+     */
+    passwordResetToken: {
+      type: new Schema(
+        {
+          tokenHash: { type: String },
+          expiresAt: { type: Date },
+          sentAt: { type: Date },
+          usedAt: { type: Date },
+        },
+        { _id: false }
+      ),
+      default: null,
+      select: false,
+    },
+    /** Verificación de correo (FASE 4). Compatibilidad con migración:
      * - verificationRequired sólo lo activa el registro público; las cuentas
      *   existentes (seed/bootstrap/alta por panel) quedan en false y siguen
      *   funcionando sin cambios.
@@ -88,6 +112,7 @@ userSchema.set('toJSON', {
     delete ret.failedLoginAttempts;
     delete ret.lockUntil;
     delete ret.emailVerification;
+    delete ret.passwordResetToken;
     return ret;
   },
 });

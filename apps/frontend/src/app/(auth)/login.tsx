@@ -140,6 +140,14 @@ export default function LoginScreen() {
                 disabled={pending}
               />
 
+              <Button
+                title="¿Olvidaste tu contraseña?"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onPress={() => router.push('/solicitar-recuperar')}
+              />
+
               {/* Cuenta sin verificar: opción de reenviar el correo (limitado
                   en el servidor:5 envíos / 15 min + enfriamiento por cuenta). */}
               {needsVerification ? (

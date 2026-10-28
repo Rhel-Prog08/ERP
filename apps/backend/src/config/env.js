@@ -104,6 +104,10 @@ module.exports = {
     resendCooldownSeconds: parseIntEnv(process.env.VERIFICATION_RESEND_COOLDOWN_SECONDS, 120),
     /** Enfriamiento mínimo entre reenvíos de invitación por invitación (segundos). */
     invitationResendCooldownSeconds: parseIntEnv(process.env.INVITATION_RESEND_COOLDOWN_SECONDS, 60),
+    /** Caducidad del token de restablecimiento de contraseña (minutos). */
+    passwordResetTtlMinutes: parseIntEnv(process.env.PASSWORD_RESET_TTL_MINUTES, 30),
+    /** Enfriamiento mínimo entre solicitudes de restablecimiento por correo (segundos). */
+    passwordResetCooldownSeconds: parseIntEnv(process.env.PASSWORD_RESET_COOLDOWN_SECONDS, 120),
   },
   jwt: {
     secret: process.env.JWT_SECRET,

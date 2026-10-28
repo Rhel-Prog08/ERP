@@ -43,6 +43,12 @@ async function authenticate(req, res, next) {
     ) {
       throw new AuthenticationError('El token de acceso fue revocado; inicia sesión nuevamente');
     }
+    if (
+      Number.isSafeInteger(payload.passwordVersion) &&
+      payload.passwordVersion !== (user.passwordVersion || 0)
+    ) {
+      throw new AuthenticationError('El token de acceso fue revocado; inicia sesión nuevamente');
+    }
     if (user.roleId.status !== 'active') {
       throw new AuthenticationError('El rol asignado está desactivado');
     }

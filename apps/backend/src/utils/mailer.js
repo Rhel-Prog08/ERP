@@ -169,9 +169,38 @@ async function sendInvitationMail({ to, firstName, token, inviterName }) {
   return result;
 }
 
-/** Sólo para tests: buzón en memoria del doble 'test'. */
-function drainTestOutbox() {
-  return testOutbox.splice(0, testOutbox.length);
+async function sendPasswordResetMail({ to, firstName, token, ttlMinutes }) {
+  const message = passwordResetEmail({ to, firstName, token, ttlMinutes });
+  const result = await sendMail(message);
+  // eslint-disable-next-line no-console
+  console.log(`[mail] restablecimiento → ${maskRecipient(to)} (${result.provider})`);
+  return result;
+}
+
+/* ------------------------------------------------------------------ *
+ * Plantillas adicionales                                              *
+ * ------------------------------------------------------------------ */
+
+function passwordResetEmail({ to, firstName, token, ttlMinutes }) {
+  const link = `${env.appUrl}/restablecer?token=${encodeURIComponent(token)}`;
+  return {
+    to,
+    subject: 'CodeEvo ERP — Restablece tu contraseña',
+    text:
+      `Hola ${firstName || ''}:\n\n` +
+      `Solicitaste restablecer la contraseña de tu cuenta en CodeEvo ERP. Abre este enlace (caduca en ${ttlMinutes} minutos):\n` +
+      `${link}\n\n` +
+      `Usa SÓLO el enlace de ESTE mensaje: cada solicitud deja sin efecto los anteriores.\n\n` +
+      `Si tú no solicitaste este cambio, ignora este mensaje y considera cambiar tu contraseña.\n` +
+      `— CodeEvo ERP`,
+    html:
+      `<p>Hola ${firstName || ''}:</p>` +
+      `<p>Solicitaste restablecer la contraseña de tu cuenta en CodeEvo ERP. Pulsa el botón (caduca en ${ttlMinutes} minutos):</p>` +
+      `<p><a href="${link}">Restablecer mi contraseña</a></p>` +
+      `<p>Usa sólo el enlace de <strong>este</strong> mensaje: cada solicitud deja sin efecto los anteriores.</p>` +
+      `<p>Si tú no solicitaste este cambio, ignora este mensaje y considera cambiar tu contraseña.</p>` +
+      `<p>— CodeEvo ERP</p>`,
+  };
 }
 
 module.exports = {
@@ -179,5 +208,6 @@ module.exports = {
   sendMail,
   sendVerificationMail,
   sendInvitationMail,
+  sendPasswordResetMail,
   drainTestOutbox,
 };

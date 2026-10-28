@@ -111,4 +111,24 @@ export const authService = {
       skipRefresh: true,
     });
   },
+
+  /** Solicitud de restablecimiento de contraseña (respuesta genérica). */
+  forgotPassword(email: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+      skipAuth: true,
+      skipRefresh: true,
+    });
+  },
+
+  /** Restablecimiento de contraseña con token de un solo uso. */
+  resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    return request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: { token, newPassword },
+      skipAuth: true,
+      skipRefresh: true,
+    });
+  },
 };

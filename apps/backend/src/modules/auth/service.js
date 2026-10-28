@@ -4,13 +4,32 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../users/model');
 const env = require('../../config/env');
-const { AuthenticationError, ValidationError, AuthorizationError } = require('../../utils/errors');
+const { withTransaction } = require('../../config/db');
+const {
+  AuthenticationError,
+  AuthorizationError,
+  NotFoundError,
+  ValidationError,
+  ConflictError,
+  ApiError,
+  MailError,
+} = require('../../utils/errors');
 const { durationToSeconds, expiryFromNow } = require('../../utils/duration');
 const { assertPasswordStrength } = require('../../utils/password');
 const { recordAudit, requestMeta } = require('../audit/service');
+const { generateToken, hashToken } = require('../../utils/tokens');
+const { sendPasswordResetMail } = require('../../utils/mailer');
 
 /** Máximo de sesiones refresh simultáneas por usuario. */
 const MAX_REFRESH_TOKENS = 5;
+
+/**
+ * Caducidad del token de restablecimiento de contraseña.
+ * Se lee de env en cada llamada para permitir cambios sin reiniciar.
+ */
+function passwordResetTtlMs() {
+  return env.registration.passwordResetTtlMinutes * 60 * 1000;
+}
 
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -21,6 +40,7 @@ function signAccessToken(user) {
       companyId: String(user.companyId),
       roleId: String(user.roleId && user.roleId._id ? user.roleId._id : user.roleId),
       roleVersion: user.roleId.authorizationVersion,
+      passwordVersion: user.passwordVersion || 0,
     },
     env.jwt.secret,
     { expiresIn: env.jwt.expiresIn }
@@ -276,6 +296,137 @@ async function changePassword({ actor, currentPassword, newPassword }, req) {
   return { message: 'Contraseña actualizada. Las demás sesiones se han cerrado.' };
 }
 
+/**
+ * FLUJO C — solicitud de restablecimiento (POST /auth/forgot-password):
+ *  - respuesta genérica (no enumera cuentas);
+ *  - token criptográfico de 32 bytes, sólo su hash en BD;
+ *  - expiración 30 min, cooldown por correo;
+ *  - envío honesto: fallo de correo → MailError (502), sin fingir envío.
+ */
+async function forgotPassword({ email }, req) {
+  const normalizedEmail = String(email).toLowerCase().trim();
+
+  const user = await User.findOne({ email: normalizedEmail }).select(
+    '_id email firstName status passwordResetToken'
+  );
+  if (!user || user.status !== 'active') {
+    // Respuesta genérica: sin distinguir si el correo existe o la cuenta está inactiva.
+    return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+  }
+
+  const now = Date.now();
+  const prt = user.passwordResetToken;
+  if (prt && prt.sentAt && now - new Date(prt.sentAt).getTime() < (env.registration.passwordResetCooldownSeconds || 120) * 1000) {
+    // Cooldown por cuenta: respuesta genérica, sin enviar nada nuevo.
+    return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+  }
+
+  const token = generateToken();
+  user.passwordResetToken = {
+    tokenHash: hashToken(token),
+    expiresAt: new Date(now + passwordResetTtlMs()),
+    sentAt: new Date(now),
+    usedAt: null,
+  };
+  await user.save();
+
+  try {
+    await sendPasswordResetMail({
+      to: normalizedEmail,
+      firstName: user.firstName,
+      token,
+      ttlMinutes: env.registration.passwordResetTtlMinutes,
+    });
+  } catch (err) {
+    // El proveedor de correo falló: no se afirma entrega. El token queda en BD
+    // (hash) y el usuario puede reintentar tras el cooldown.
+    throw new MailError('No se pudo enviar el correo de restablecimiento; inténtelo nuevamente.');
+  }
+
+  await recordAudit({
+    userId: user._id,
+    companyId: user.companyId,
+    action: 'FORGOT_PASSWORD',
+    module: 'auth',
+    entity: 'user',
+    entityId: user._id,
+    description: 'Solicitud de restablecimiento de contraseña',
+    ...requestMeta(req),
+  });
+
+  return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+}
+
+/**
+ * FLUJO C — restablecimiento de contraseña (POST /auth/reset-password):
+ *  - verifica hash, vencimiento y estado de uso del token;
+ *  - aplica política de contraseñas;
+ *  - consume el token de forma atómica (una sola vez);
+ *  - invalida refresh tokens e incrementa passwordVersion (revoca JWTs previos);
+ *  - todo en transacción cuando sea posible.
+ */
+async function resetPassword({ token, newPassword }, req) {
+  assertPasswordStrength(newPassword, 'newPassword');
+
+  const user = await User.findOne({ 'passwordResetToken.tokenHash': hashToken(token) }).select(
+    '+password +passwordResetToken +refreshTokens'
+  );
+
+  const prt = user && user.passwordResetToken;
+  if (
+    !user ||
+    !prt ||
+    !prt.tokenHash ||
+    prt.usedAt ||
+    prt.expiresAt.getTime() < Date.now()
+  ) {
+    throw new ValidationError('El token de restablecimiento no es válido o ha caducado');
+  }
+
+  const now = Date.now();
+  const result = await withTransaction(async (session) => {
+    const opts = session ? { session } : {};
+
+    // Re-leer dentro de la transacción para detectar uso concurrente.
+    const current = await User.findById(user._id).select(
+      '+password +passwordResetToken +refreshTokens'
+    ).session(session);
+    if (!current) throw new ValidationError('El token de restablecimiento no es válido o ha caducado');
+    const currentPrt = current.passwordResetToken;
+    if (
+      !currentPrt ||
+      !currentPrt.tokenHash ||
+      currentPrt.usedAt ||
+      currentPrt.expiresAt.getTime() < Date.now()
+    ) {
+      throw new ValidationError('El token de restablecimiento no es válido o ha caducado');
+    }
+
+    // Consumir el token (único uso) antes de cambiar la contraseña.
+    currentPrt.usedAt = new Date(now);
+
+    current.password = newPassword; // hash en pre('save')
+    current.refreshTokens = [];     // revoca todas las sesiones (refresh tokens)
+    current.passwordVersion = (current.passwordVersion || 0) + 1; // invalida JWTs previos
+    await current.save(opts);
+
+    await recordAudit({
+      userId: current._id,
+      companyId: current.companyId,
+      action: 'RESET_PASSWORD',
+      module: 'auth',
+      entity: 'user',
+      entityId: current._id,
+      description: 'Contraseña restablecida por token',
+      ...requestMeta(req),
+    }, { session, strict: Boolean(session) });
+
+    return current;
+  });
+
+  return { message: 'Contraseña actualizada correctamente. Todas las sesiones se han cerrado.' };
+}
+
 /** Perfil del usuario autenticado (para arrancar la UI con sus permisos). */
 async function getMe(actor) {
   const user = await User.findById(actor.id).populate(POPULATE);
@@ -285,4 +436,4 @@ async function getMe(actor) {
   return serializeUser(user);
 }
 
-module.exports = { login, refresh, logout, changePassword, getMe, serializeUser };
+module.exports = { login, refresh, logout, changePassword, forgotPassword, resetPassword, getMe, serializeUser };
