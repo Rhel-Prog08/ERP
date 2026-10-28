@@ -136,6 +136,15 @@ function sendViaTestDouble(message) {
   return { provider: 'test' };
 }
 
+/** Sólo para tests: devuelve y vacía el buzón en memoria del doble 'test'. */
+function drainTestOutbox() {
+  if (!env.isTest) {
+    // Red de seguridad: el doble jamás opera fuera de NODE_ENV=test.
+    throw new MailError('Doble de pruebas de correo fuera de NODE_ENV=test');
+  }
+  return testOutbox.splice(0, testOutbox.length);
+}
+
 /**
  * Envía un mensaje. Lanza MailError si no hay proveedor o el envío falla.
  * El llamador decide si el error es fatal (registro) o se reintenta.
