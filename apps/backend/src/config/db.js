@@ -14,6 +14,14 @@ const env = require('./env');
 
 let txSupported = false;
 
+// AutoIndex desactivado explícitamente en producción para evitar que
+// Mongoose intente crear índices en MongoDB Atlas al arrancar. En
+// desarrollo y pruebas se conserva el valor por defecto (true) para no
+// alterar innecesariamente esos entornos.
+if (typeof mongoose.set === 'function') {
+  mongoose.set('autoIndex', !env.isProd);
+}
+
 /** Oculta credenciales de la URI en los logs. */
 function sanitizeUri(uri) {
   return String(uri).replace(/\/\/([^@/]+)@/, '//***@');

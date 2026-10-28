@@ -67,6 +67,7 @@ function loadAuthServiceWithMocks(opts = {}) {
     hashTokenImpl,
     bcryptHashImpl,
     bcryptCompareImpl,
+    auditShouldThrow,
   } = opts;
 
   const user = makeUser(userData);
@@ -89,7 +90,10 @@ function loadAuthServiceWithMocks(opts = {}) {
 
   let lastAudit = null;
   const mockAudit = {
-    recordAudit: async (entry) => { lastAudit = entry; },
+    recordAudit: async (entry) => {
+      if (auditShouldThrow) throw new Error('Auditoría caída');
+      lastAudit = entry;
+    },
     requestMeta: () => ({}),
   };
 
@@ -237,19 +241,52 @@ describe('FORGOT PASSWORD', () => {
     assert.equal(lastMailArgs, beforeMailArgs);
   });
 
-  it('fallo de correo → MailError, NO revoca/invalida el token', async () => {
+  it('fallo de correo: respuesta genérica, token guardado, sin error al cliente', async () => {
     const { svc, user, setSendMailShouldThrow } = loadAuthServiceWithMocks();
 
     setSendMailShouldThrow(true);
 
-    await assert.rejects(
-      svc.forgotPassword({ email: 'usuario@empresa.test' }, actorishReq),
-      (err) => err.code === 'MAIL_ERROR'
-    );
+    const result = await svc.forgotPassword({ email: 'usuario@empresa.test' }, actorishReq);
 
-    // El token quedó en BD (no se revocó)
+    assert.equal(result.message, 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.');
+    // El token quedó en BD (no se revocó, se puede reintentar tras cooldown)
     assert.equal(user.passwordResetToken.tokenHash, 'hash-of-token-abc');
     assert.equal(user.passwordResetToken.usedAt, null);
+  });
+
+  it('fallo de correo + fallo de auditoría: respuesta genérica sin error al cliente (no revela existencia)', async () => {
+    const { svc, user, setSendMailShouldThrow } = loadAuthServiceWithMocks({
+      auditShouldThrow: true,
+    });
+
+    setSendMailShouldThrow(true);
+
+    // No debe lanzar: ni el error de correo ni el de auditoría se propagan.
+    const result = await svc.forgotPassword({ email: 'usuario@empresa.test' }, actorishReq);
+
+    assert.equal(result.message, 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.');
+    assert.equal(user.passwordResetToken.tokenHash, 'hash-of-token-abc');
+    assert.equal(user.passwordResetToken.usedAt, null);
+  });
+
+  it('respuesta idéntica: correo existente, inexistente y fallo de proveedor', async () => {
+    const generic = 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.';
+
+    // Correo inexistente
+    const { svc: svc1 } = loadAuthServiceWithMocks({ userData: null });
+    const r1 = await svc1.forgotPassword({ email: 'noexiste@empresa.test' }, actorishReq);
+    assert.equal(r1.message, generic);
+
+    // Cuenta inactiva
+    const { svc: svc2 } = loadAuthServiceWithMocks({ userData: { status: 'inactive' } });
+    const r2 = await svc2.forgotPassword({ email: 'inactivo@empresa.test' }, actorishReq);
+    assert.equal(r2.message, generic);
+
+    // Correo existente + fallo de proveedor
+    const { svc: svc3, setSendMailShouldThrow: smt } = loadAuthServiceWithMocks();
+    smt(true);
+    const r3 = await svc3.forgotPassword({ email: 'usuario@empresa.test' }, actorishReq);
+    assert.equal(r3.message, generic);
   });
 
   it('registra auditoría FORGOT_PASSWORD', async () => {

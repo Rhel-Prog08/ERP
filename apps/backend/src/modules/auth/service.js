@@ -301,24 +301,33 @@ async function changePassword({ actor, currentPassword, newPassword }, req) {
  *  - respuesta genérica (no enumera cuentas);
  *  - token criptográfico de 32 bytes, sólo su hash en BD;
  *  - expiración 30 min, cooldown por correo;
- *  - envío honesto: fallo de correo → MailError (502), sin fingir envío.
+ *  - respuesta SIEMPRE genérica: indistinguible si el correo existe,
+ *    si la cuenta está inactiva o si el proveedor de correo falló.
+ *  - el error del proveedor se registra internamente sin exponer datos
+ *    sensibles y no se propaga al cliente (código HTTP y cuerpo idénticos
+ *    en todos los casos).
  */
 async function forgotPassword({ email }, req) {
   const normalizedEmail = String(email).toLowerCase().trim();
+
+  // Respuesta SIEMPRE genérica: indistinguible si el correo existe,
+  // si la cuenta está inactiva o si el proveedor de correo falló.
+  const genericResponse = {
+    message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.',
+  };
 
   const user = await User.findOne({ email: normalizedEmail }).select(
     '_id email firstName status passwordResetToken'
   );
   if (!user || user.status !== 'active') {
-    // Respuesta genérica: sin distinguir si el correo existe o la cuenta está inactiva.
-    return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+    return genericResponse;
   }
 
   const now = Date.now();
   const prt = user.passwordResetToken;
   if (prt && prt.sentAt && now - new Date(prt.sentAt).getTime() < (env.registration.passwordResetCooldownSeconds || 120) * 1000) {
     // Cooldown por cuenta: respuesta genérica, sin enviar nada nuevo.
-    return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+    return genericResponse;
   }
 
   const token = generateToken();
@@ -337,24 +346,39 @@ async function forgotPassword({ email }, req) {
       token,
       ttlMinutes: env.registration.passwordResetTtlMinutes,
     });
+
+    await recordAudit({
+      userId: user._id,
+      companyId: user.companyId,
+      action: 'FORGOT_PASSWORD',
+      module: 'auth',
+      entity: 'user',
+      entityId: user._id,
+      description: 'Solicitud de restablecimiento de contraseña',
+      ...requestMeta(req),
+    });
   } catch (err) {
-    // El proveedor de correo falló: no se afirma entrega. El token queda en BD
-    // (hash) y el usuario puede reintentar tras el cooldown.
-    throw new MailError('No se pudo enviar el correo de restablecimiento; inténtelo nuevamente.');
+    // El proveedor de correo falló: el error NO se propaga al cliente para
+    // evitar que el código de estado HTTP revele si el correo existe. El
+    // evento se registra internamente sin datos sensibles. Si la auditoría
+    // también falla, se ignora para no revelar la existencia de la cuenta.
+    try {
+      await recordAudit({
+        userId: user._id,
+        companyId: user.companyId,
+        action: 'FORGOT_PASSWORD_FAILED',
+        module: 'auth',
+        entity: 'user',
+        entityId: user._id,
+        description: 'Fallo del proveedor de correo al enviar restablecimiento',
+        ...requestMeta(req),
+      });
+    } catch {
+      // Auditoría no crítica: no se propaga el error.
+    }
   }
 
-  await recordAudit({
-    userId: user._id,
-    companyId: user.companyId,
-    action: 'FORGOT_PASSWORD',
-    module: 'auth',
-    entity: 'user',
-    entityId: user._id,
-    description: 'Solicitud de restablecimiento de contraseña',
-    ...requestMeta(req),
-  });
-
-  return { message: 'Si el correo pertenece a una cuenta activa, recibirá un mensaje con el enlace de restablecimiento.' };
+  return genericResponse;
 }
 
 /**
