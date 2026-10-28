@@ -41,7 +41,14 @@ interface MenuPosition {
 
 const MENU_GAP = 4;
 const VIEWPORT_MARGIN = 8;
-const MENU_Z_INDEX = 2000;
+/**
+ * z-index del menú desplegable en web. Debe superar al overlay de un Modal
+ * de react-native-web (ModalAnimation usa zIndex 9999): el menú se renderiza
+ * en un PORTAL hacia document.body, por lo que compite en el mismo stacking
+ * context raíz que el contenedor del modal. Con un valor menor el overlay
+ * tapa las opciones y el menú no se puede seleccionar dentro de formularios.
+ */
+const MENU_Z_INDEX = 10000;
 /** Altura mínima "cómoda" para abrir hacia abajo antes de intentar hacia arriba. */
 const MIN_COMFORT_BELOW = 180;
 
